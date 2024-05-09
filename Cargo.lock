@@ -1000,9 +1000,11 @@ name = "l_system"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytemuck",
  "console_error_panic_hook",
  "console_log",
  "jandering_engine",
+ "lazy_static",
  "log",
  "pollster",
  "rand",

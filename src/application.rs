@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use jandering_engine::{
     core::{
         bind_group::{
@@ -13,17 +15,27 @@ use jandering_engine::{
         },
         shader::ShaderDescriptor,
         texture::{TextureDescriptor, TextureFormat},
-        window::WindowEvent,
+        window::{InputState, Key, WindowEvent},
     },
     types::{Vec2, Vec3},
+    utils::load_text,
 };
 
-use crate::camera_controller::FreeCameraController;
+use crate::{
+    camera_controller::FreeCameraController,
+    color_obj::{load_obj_color, ColorObject, ColorVertex},
+};
+
+lazy_static::lazy_static! {
+    #[derive(Debug)]
+    pub static ref SHADER_CODE_MUTEX: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+}
 
 pub struct Application {
     last_time: web_time::Instant,
     time: f32,
     cube: Object<Instance>,
+    road: ColorObject,
     ground: Object<Instance>,
     shader: ShaderHandle,
     camera: BindGroupHandle<MatrixCameraBindGroup>,
@@ -61,9 +73,12 @@ impl Application {
         *camera.direction() = Vec3::new(1.0, -1.0, 1.0).normalize();
         let camera = create_typed_bind_group(engine.renderer.as_mut(), camera);
 
-        let shader = engine.renderer.create_shader(
+        let shader: ShaderHandle = engine.renderer.create_shader(
             ShaderDescriptor::default()
-                .with_descriptors(vec![Vertex::desc(), Instance::desc()])
+                .with_source(jandering_engine::core::shader::ShaderSource::Code(
+                    include_str!("../res/shaders/shader.wgsl").to_string(),
+                ))
+                .with_descriptors(vec![ColorVertex::desc(), Instance::desc()])
                 .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
                 .with_depth(true)
                 .with_backface_culling(false),
@@ -85,6 +100,22 @@ impl Application {
             instances,
         );
 
+        let road_instances = (-10..10)
+            .flat_map(|x| {
+                (-10..10)
+                    .map(|y| {
+                        Instance::default().translate(Vec3::new(x as f32, 0.0, y as f32) * 10.0)
+                    })
+                    .collect::<Vec<Instance>>()
+            })
+            .collect();
+
+        let road = ColorObject::from_obj(
+            include_str!("../res/road.obj"),
+            engine.renderer.as_mut(),
+            road_instances,
+        );
+
         let ground = Object::from_obj(
             include_str!("../res/ground.obj"),
             engine.renderer.as_mut(),
@@ -103,6 +134,7 @@ impl Application {
             last_time: web_time::Instant::now(),
             time: 0.0,
             cube,
+            road,
             ground,
             shader,
             camera,
@@ -117,6 +149,41 @@ impl EventHandler for Application {
         let dt = (current_time - self.last_time).as_secs_f32();
         self.last_time = current_time;
         self.time += dt;
+
+        let mut guard = SHADER_CODE_MUTEX.lock().unwrap();
+        if let Some(code) = guard.clone() {
+            context.renderer.create_shader_at(
+                ShaderDescriptor::default()
+                    .with_source(jandering_engine::core::shader::ShaderSource::Code(code))
+                    .with_descriptors(vec![Vertex::desc(), Instance::desc()])
+                    .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
+                    .with_depth(true)
+                    .with_backface_culling(false),
+                self.shader,
+            );
+            *guard = None;
+        }
+
+        if context.events.iter().any(|e| {
+            matches!(
+                e,
+                WindowEvent::KeyInput {
+                    key: Key::V,
+                    state: InputState::Pressed
+                }
+            )
+        }) {
+            wasm_bindgen_futures::spawn_local(async move {
+                let text = load_text(jandering_engine::utils::FilePath::FileName(
+                    "shaders/shader.wgsl",
+                ))
+                .await
+                .unwrap();
+
+                let mut guard = SHADER_CODE_MUTEX.lock().unwrap();
+                *guard = Some(text);
+            });
+        }
 
         if context
             .events
@@ -161,7 +228,7 @@ impl EventHandler for Application {
             .with_clear_color(0.2, 0.5, 1.0)
             .set_shader(self.shader)
             .bind(0, self.camera.into())
-            .render(&[&self.ground, &self.cube])
+            .render(&[&self.ground, &self.road, &self.cube])
             .submit();
     }
 }

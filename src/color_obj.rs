@@ -1,21 +1,48 @@
 use jandering_engine::{
     core::{
-        object::{Instance, ObjectRenderData, Renderable},
+        object::{Instance, ObjectRenderData, Renderable, Vertex},
         renderer::{BufferHandle, Renderer},
+        shader::{
+            BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode,
+        },
     },
     types::{UVec2, Vec2, Vec3},
 };
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug, Default)]
 pub struct ColorVertex {
     pub position: Vec3,
+    pub position_padding: f32,
     pub normal: Vec3,
+    pub normal_padding: f32,
     pub color: Vec3,
+    pub color_padding: f32,
 }
 
-impl ColorVertex {}
+impl ColorVertex {
+    pub fn desc() -> BufferLayout {
+        BufferLayout {
+            step_mode: BufferLayoutStepMode::Vertex,
+            entries: &[
+                BufferLayoutEntry {
+                    location: 0,
+                    data_type: BufferLayoutEntryDataType::Float32x4,
+                },
+                BufferLayoutEntry {
+                    location: 1,
+                    data_type: BufferLayoutEntryDataType::Float32x4,
+                },
+                BufferLayoutEntry {
+                    location: 2,
+                    data_type: BufferLayoutEntryDataType::Float32x4,
+                },
+            ],
+        }
+    }
+}
 
+#[derive(Debug)]
 pub struct ColorObject {
     pub vertices: Vec<ColorVertex>,
     //
@@ -90,8 +117,11 @@ pub fn load_obj_color(data: &str) -> (Vec<ColorVertex>, Vec<u32>) {
             indices.push(index);
             vertices.push(ColorVertex {
                 position: positions_and_colors[group[0] as usize].0,
+                position_padding: 0.0,
                 normal: normals[group[2] as usize],
+                normal_padding: 0.0,
                 color: positions_and_colors[group[0] as usize].1,
+                color_padding: 0.0,
             });
             mapped_vertices.push((key, index))
         }
@@ -134,6 +164,7 @@ impl ColorObject {
         Self::new(renderer, vertices, indices, instances)
     }
 
+    #[allow(dead_code)]
     pub fn update(&mut self, renderer: &mut dyn Renderer) {
         if self.previous_instances_len != self.instances.len() {
             self.render_data.instance_buffer =
@@ -163,5 +194,15 @@ impl Renderable for ColorObject {
             self.render_data.index_buffer,
             Some(self.render_data.instance_buffer),
         )
+    }
+}
+
+impl From<Vertex> for ColorVertex {
+    fn from(v: Vertex) -> Self {
+        ColorVertex {
+            position: v.position,
+            normal: v.normal,
+            ..Default::default()
+        }
     }
 }

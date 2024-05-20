@@ -4,6 +4,10 @@ use jandering_engine::core::{engine::EngineBuilder, window::WindowBuilder};
 mod application;
 mod camera_controller;
 mod color_obj;
+mod cylinder;
+mod icosphere;
+mod l_system;
+mod mesh_renderer;
 
 use wasm_bindgen::prelude::*;
 

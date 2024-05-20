@@ -30,6 +30,7 @@ web-sys = { version = "0.3", features = [
 ]}
 bytemuck = { version = "1.14.0", features = ["derive"] }
 web-time = "1.1.0"
+glam = "0.27.0"
 
 [dependencies.jandering_engine]
 path = "../jandering_engine"

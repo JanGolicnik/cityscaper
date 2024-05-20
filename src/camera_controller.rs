@@ -7,7 +7,7 @@ use jandering_engine::{
 };
 const CAMERA_SPEED: f32 = 20.0;
 
-pub struct FreeCameraController {
+pub struct IsometricCameraController {
     pub pan_speed: f32,
 
     pub right_pressed: bool,
@@ -23,7 +23,7 @@ pub struct FreeCameraController {
     pub pan_delta: Vec2,
 }
 
-impl Default for FreeCameraController {
+impl Default for IsometricCameraController {
     fn default() -> Self {
         Self {
             pan_speed: 0.03,
@@ -45,7 +45,7 @@ impl Default for FreeCameraController {
     }
 }
 
-impl FreeCameraController {
+impl IsometricCameraController {
     fn mouse_motion(&mut self, position: Vec2) {
         if !self.mouse_down {
             return;
@@ -59,7 +59,7 @@ impl FreeCameraController {
     }
 }
 
-impl CameraController for FreeCameraController {
+impl CameraController for IsometricCameraController {
     fn event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::MouseMotion(position) => {

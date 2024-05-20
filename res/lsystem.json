@@ -1,0 +1,65 @@
+{
+  "rules": {
+    "iterations": 4,
+    "initial": "SAAA",
+    "rules": {
+      "A": [
+        {
+          "result": "B[^fA]",
+          "chance": 0.1
+        },
+        {
+          "result": "B[^f]A",
+          "chance": 0.2
+        },
+        {
+          "result": "R[^fA]RA",
+          "chance": 0.7
+        }
+      ],
+      "R": [
+        {
+          "result": "+(0.0-360.0)^(0.0-20.0)>(-10.0-10.0)",
+          "chance": 1.0
+        }
+      ],
+      "S": [
+        {
+          "result": "ff",
+          "chance": 0.3
+        },
+        {
+          "result": "f",
+          "chance": 0.3
+        },
+        {
+          "result": "",
+          "chance": 0.3
+        },
+        {
+          "result": "fff",
+          "chance": 0.1
+        }
+      ]
+    }
+  },
+  "rendering": {
+    "default_angle_change": 15.0,
+    "shapes": {
+      "f": {
+        "Line": {
+          "width": 4,
+          "length": 0.2,
+          "angle": 20.0,
+          "color": [0.5, 0.7, 0.1]
+        }
+      },
+      "l": {
+        "Circle": {
+          "size": 0.01,
+          "color": [1.0, 0.5, 0.2]
+        }
+      }
+    }
+  }
+}

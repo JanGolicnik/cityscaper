@@ -14,6 +14,12 @@ var tex: texture_2d<f32>;
 @group(1) @binding(1)
 var tex_sampler: sampler;
 
+struct VertexInput{
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
+};
+
 struct InstanceInput{
     @location(5) model_matrix_0: vec4<f32>,
     @location(6) model_matrix_1: vec4<f32>,
@@ -26,16 +32,10 @@ struct InstanceInput{
     @location(12) inv_model_matrix_3: vec4<f32>,
 }
 
-struct VertexInput{
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-};
-
 struct VertexOutput{
     @builtin(position) clip_position: vec4<f32>,
     @location(1) normal: vec3<f32>,
-    @location(0) uv: vec2<f32>,
+    @location(0) color: vec3<f32>,
 };
 
 @vertex
@@ -64,7 +64,7 @@ fn vs_main(
     var out: VertexOutput;
     out.clip_position = camera.view_proj * world_position;
     out.normal = normalize(normal.xyz);
-    out.uv = model.uv;
+    out.color = model.color;
     
     return out;
 }
@@ -74,13 +74,8 @@ fn vs_main(
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
     let light_dir = vec3<f32>(-1.0);
 
-    let warm = vec3<f32>(1.0, 0.8, 0.5);
-    let cool = vec3<f32>(0.2, 0.5, 1.0);
+    let d = max(dot(light_dir, in.normal), 0.0);
+    let color = in.color * (1.0 - d * 0.1);
 
-    let d = dot(light_dir, in.normal) * 0.5 + 0.5;
-    let color = warm * (1.0 - d) + cool * d; 
-
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(color , 1.0);
 }
-
-

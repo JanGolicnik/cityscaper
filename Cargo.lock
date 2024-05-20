@@ -636,6 +636,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
+
+[[package]]
 name = "glow"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -919,7 +925,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "env_logger",
- "glam",
+ "glam 0.25.0",
  "image",
  "log",
  "pollster",
@@ -1003,6 +1009,7 @@ dependencies = [
  "bytemuck",
  "console_error_panic_hook",
  "console_log",
+ "glam 0.27.0",
  "jandering_engine",
  "lazy_static",
  "log",

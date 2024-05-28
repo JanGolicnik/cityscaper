@@ -1,12 +1,12 @@
 use jandering_engine::{
     core::{
-        object::{Instance, ObjectRenderData, Renderable, Vertex},
+        object::{primitives::quad_data, Instance, ObjectRenderData, Renderable, Vertex},
         renderer::{BufferHandle, Renderer},
         shader::{
             BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode,
         },
     },
-    types::{UVec2, Vec2, Vec3},
+    types::Vec3,
 };
 
 #[repr(C)]
@@ -55,81 +55,6 @@ pub struct ColorObject {
     previous_instances_len: usize,
 }
 
-pub fn load_obj_color(data: &str) -> (Vec<ColorVertex>, Vec<u32>) {
-    let mut positions_and_colors = Vec::new();
-    let mut normals = Vec::new();
-    let mut uvs = Vec::new();
-    let mut groups: Vec<Vec<u32>> = Vec::new();
-
-    for line in data
-        .lines()
-        .filter(|e| !matches!(e.chars().next(), Some('#') | None))
-    {
-        let seprated = line.split(' ').collect::<Vec<_>>();
-        match seprated.first() {
-            Some(&"v") => {
-                let x = seprated[1].parse::<f32>().unwrap();
-                let y = seprated[2].parse::<f32>().unwrap();
-                let z = seprated[3].parse::<f32>().unwrap();
-
-                let r = seprated[4].parse::<f32>().unwrap();
-                let g = seprated[5].parse::<f32>().unwrap();
-                let b = seprated[6].parse::<f32>().unwrap();
-
-                positions_and_colors.push((Vec3::new(x, y, z), Vec3::new(r, g, b)));
-            }
-            Some(&"vn") => {
-                let x = seprated[1].parse::<f32>().unwrap();
-                let y = seprated[2].parse::<f32>().unwrap();
-                let z = seprated[3].parse::<f32>().unwrap();
-                normals.push(Vec3::new(x, y, z));
-            }
-            Some(&"vt") => {
-                let x = seprated[1].parse::<f32>().unwrap();
-                let y = seprated[2].parse::<f32>().unwrap();
-                uvs.push(Vec2::new(x, y));
-            }
-            Some(&"f") => {
-                let mut arr: Vec<Vec<u32>> = (1..4)
-                    .map(|i| {
-                        seprated[i]
-                            .split('/')
-                            .map(|e| e.parse::<u32>().unwrap().saturating_sub(1))
-                            .collect::<Vec<_>>()
-                    })
-                    .collect();
-                groups.append(&mut arr);
-            }
-            _ => {}
-        }
-    }
-
-    let mut indices = Vec::new();
-    let mut vertices = Vec::new();
-    let mut mapped_vertices: Vec<(UVec2, u32)> = Vec::new();
-    for group in groups {
-        let key = UVec2::new(group[0], group[1]);
-        if let Some(e) = mapped_vertices.iter().find(|e| e.0 == key) {
-            // TODO: optimize this
-            indices.push(e.1)
-        } else {
-            let index = vertices.len() as u32;
-            indices.push(index);
-            vertices.push(ColorVertex {
-                position: positions_and_colors[group[0] as usize].0,
-                position_padding: 0.0,
-                normal: normals[group[2] as usize],
-                normal_padding: 0.0,
-                color: positions_and_colors[group[0] as usize].1,
-                color_padding: 0.0,
-            });
-            mapped_vertices.push((key, index))
-        }
-    }
-
-    (vertices, indices)
-}
-
 impl ColorObject {
     pub fn new(
         renderer: &mut dyn Renderer,
@@ -158,12 +83,6 @@ impl ColorObject {
             previous_instances_len,
         }
     }
-
-    pub fn from_obj(data: &str, renderer: &mut dyn Renderer, instances: Vec<Instance>) -> Self {
-        let (vertices, indices) = load_obj_color(data);
-        Self::new(renderer, vertices, indices, instances)
-    }
-
     #[allow(dead_code)]
     pub fn update(&mut self, renderer: &mut dyn Renderer) {
         if self.previous_instances_len != self.instances.len() {
@@ -176,6 +95,20 @@ impl ColorObject {
                 bytemuck::cast_slice(&self.instances),
             );
         }
+    }
+
+    pub fn quad(renderer: &mut dyn Renderer, color: Vec3, instances: Vec<Instance>) -> Self {
+        let (vertices, indices) = quad_data();
+        let vertices = vertices
+            .into_iter()
+            .map(|e| {
+                let mut v = ColorVertex::from(e);
+                v.color = color;
+                v
+            })
+            .collect();
+
+        Self::new(renderer, vertices, indices, instances)
     }
 }
 

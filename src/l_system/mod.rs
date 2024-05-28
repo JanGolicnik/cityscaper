@@ -1,73 +1,83 @@
 use std::collections::HashMap;
 
-use rand::Rng;
-use serde::Deserialize;
+use rand::{rngs::ThreadRng, Rng};
+
+use self::config::{LRule, LSymbol, LSystemBuildConfig};
 
 pub mod builder;
-
-#[derive(Deserialize, Debug)]
-pub struct Rule {
-    result: String,
-    chance: f32,
-}
-
-#[derive(Deserialize)]
-pub struct LSystemConfig {
-    iterations: u32,
-    initial: String,
-    rules: HashMap<char, Vec<Rule>>,
-}
-
-impl Default for LSystemConfig {
-    fn default() -> Self {
-        Self {
-            iterations: 0,
-            initial: "".to_string(),
-            rules: HashMap::new(),
-        }
-    }
-}
+pub mod config;
+pub mod test;
 
 #[derive(Debug)]
 pub struct LSystem {
-    symbols: Vec<char>,
+    symbols: Vec<LSymbol>,
 }
 
 impl LSystem {
-    pub fn new(config: LSystemConfig) -> Self {
-        let LSystemConfig {
+    pub fn new(config: &LSystemBuildConfig, rng: &mut ThreadRng) -> Self {
+        let LSystemBuildConfig {
             iterations,
             initial,
             rules,
         } = config;
-        let mut rng = rand::thread_rng();
 
-        let mut pick_rule = |rules: &[Rule]| {
-            let n = rng.gen::<f32>();
-            let mut t = 0.0;
-            for rule in rules.iter() {
-                t += rule.chance;
-                if t > n {
-                    return Some(rule.result.clone());
-                }
-            }
-            None
-        };
-
-        let mut symbols = initial.chars().collect::<Vec<_>>();
-        (0..iterations).for_each(|_| {
-            let mut new_symbols = Vec::new();
-            for symbol in symbols.iter() {
-                if let Some(rules) = rules.get(symbol) {
-                    let mut new_chars = pick_rule(rules).unwrap().chars().collect::<Vec<_>>();
-                    new_symbols.append(&mut new_chars);
-                } else {
-                    new_symbols.push(*symbol);
-                }
-            }
-            symbols = std::mem::take(&mut new_symbols);
-        });
-
+        let mut symbols = initial.clone();
+        for i in 0..*iterations {
+            symbols = iterate(symbols, rules, rng, i);
+        }
         Self { symbols }
     }
+}
+
+fn iterate(
+    symbols: Vec<LSymbol>,
+    rules: &HashMap<char, Vec<LRule>>,
+    rng: &mut ThreadRng,
+    iteration: u32,
+) -> Vec<LSymbol> {
+    let mut new_symbols = Vec::with_capacity(symbols.capacity() * 2);
+
+    for symbol in symbols {
+        match symbol {
+            LSymbol::Rule(id) => {
+                if let Some(rules) = rules.get(&id) {
+                    if let Some(rule) = pick_rule(rules, rng, iteration) {
+                        new_symbols.reserve(rule.len());
+                        let mut rule = rule.clone();
+                        rule.iter_mut().for_each(|e| {
+                            if let LSymbol::Object { age, .. } = e {
+                                *age = iteration;
+                            }
+                        });
+                        new_symbols.append(&mut rule);
+                    }
+                }
+            }
+            _ => new_symbols.push(symbol),
+        }
+    }
+
+    new_symbols
+}
+
+pub(super) fn pick_rule<'rules>(
+    rules: &'rules [LRule],
+    rng: &mut ThreadRng,
+    gen: u32,
+) -> Option<&'rules Vec<LSymbol>> {
+    let n = rng.gen::<f32>();
+    let mut t = 0.0;
+    for rule in rules.iter() {
+        if rule.min_gen.is_some_and(|v| gen < v) {
+            continue;
+        }
+        if rule.max_gen.is_some_and(|v| gen > v) {
+            continue;
+        }
+        t += rule.chance;
+        if t > n {
+            return Some(&rule.result);
+        }
+    }
+    None
 }

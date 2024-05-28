@@ -1,4 +1,6 @@
-use jandering_engine::{core::object::Vertex, types::Vec2};
+use jandering_engine::types::{Mat4, Vec3};
+
+use crate::color_obj::ColorVertex;
 
 type Triangle = [u32; 3];
 
@@ -50,15 +52,20 @@ mod icosahedron {
     ];
 }
 
-pub fn generate(_: u32) -> (Vec<Vertex>, Vec<u32>) {
+pub fn generate(color: Vec3, mat: Mat4, index_offset: u32) -> (Vec<ColorVertex>, Vec<u32>) {
     let vertices = icosahedron::VERTICES
         .iter()
-        .map(|v| Vertex {
-            position: *v,
+        .map(|v| ColorVertex {
+            position: mat.transform_vector3(*v),
             normal: v.normalize(),
-            uv: Vec2::ZERO,
+            color,
+            ..Default::default()
         })
         .collect();
-    let indices = icosahedron::TRIANGLES.iter().flat_map(|e| *e).collect();
+    let indices = icosahedron::TRIANGLES
+        .iter()
+        .flatten()
+        .map(|e| *e + index_offset)
+        .collect();
     (vertices, indices)
 }

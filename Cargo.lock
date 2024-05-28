@@ -911,6 +911,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "is_none_or"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51348eca70aa22f39a6b5cba003772e3f5ab364a43ae2831a44fbb76ae182334"
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1010,11 +1016,14 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "glam 0.27.0",
+ "is_none_or",
  "jandering_engine",
  "lazy_static",
  "log",
  "pollster",
+ "prev-iter",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -1459,6 +1468,12 @@ name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
+
+[[package]]
+name = "prev-iter"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d1b0aee15078d8a0671812084cb95f78d84b24424476bb3a113406c818d5a79"
 
 [[package]]
 name = "proc-macro-crate"

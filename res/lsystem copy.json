@@ -1,6 +1,6 @@
 {
   "rules": {
-    "iterations": 12,
+    "iterations": 6,
     "initial": "A",
     "rules": {
       "A": [
@@ -73,8 +73,8 @@
     },
     "colors": [
       { "age": 0, "color": [0.01, 0.01, 0.01] },
-      { "age": 9, "color": [0.2, 0.2, 0.2] },
-      { "age": 12, "color": [1.0, 1.0, 1.0] }
+      { "age": 10, "color": [0.2, 0.2, 0.2] },
+      { "age": 14, "color": [1.0, 1.0, 1.0] }
     ]
   }
 }

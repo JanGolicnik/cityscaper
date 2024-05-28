@@ -77,5 +77,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
     let d = max(dot(light_dir, in.normal), 0.0);
     let color = in.color * (1.0 - d * 0.1);
 
-    return vec4<f32>(color , 1.0);
+    return vec4<f32>(in.color , 1.0);
 }

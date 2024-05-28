@@ -7,7 +7,7 @@ mod color_obj;
 mod cylinder;
 mod icosphere;
 mod l_system;
-mod mesh_renderer;
+mod timer;
 
 use wasm_bindgen::prelude::*;
 

@@ -1,7 +1,7 @@
 use jandering_engine::{
     core::{
         bind_group::{
-            camera::free::{CameraController, MatrixCameraBindGroup},
+            camera::free::{CameraController, FreeCameraController, MatrixCameraBindGroup},
             BindGroup,
         },
         engine::{Engine, EngineContext},
@@ -18,18 +18,18 @@ use jandering_engine::{
     types::{Mat4, Qua, Vec2, Vec3},
     utils::load_text,
 };
-use serde::{de::VariantAccess, Deserialize};
-use std::sync::{Arc, Mutex};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     camera_controller::IsometricCameraController,
     color_obj::{ColorObject, ColorVertex},
     cylinder, icosphere,
-    l_system::{
-        builder::{RenderConfig, RenderShape},
-        LSystem, LSystemConfig,
-    },
-    mesh_renderer::{Mesh, MeshRenderer},
+    l_system::{self, builder::RenderShape, config::LConfig, LSystem},
+    timer::Timer,
 };
 
 lazy_static::lazy_static! {
@@ -37,22 +37,28 @@ lazy_static::lazy_static! {
     pub static ref SHADER_CODE_MUTEX: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 }
 
-struct Plant {
-    variations: [ColorObject; NUM_PLANT_VARIATIONS],
-}
-
 pub struct Application {
     last_time: web_time::Instant,
     time: f32,
     shader: ShaderHandle,
     camera: BindGroupHandle<MatrixCameraBindGroup>,
+    camera_controller: Box<dyn CameraController>,
     depth_texture: TextureHandle,
-    mesh_renderer: MeshRenderer,
-    intersection_instances: Vec<Instance>,
-    road_instances: Vec<Instance>,
 
-    plants: Vec<Plant>,
+    #[allow(dead_code)]
+    default_shader: ShaderHandle,
+
+    plants: HashMap<(i32, i32), ColorObject>,
+    l_config: LConfig,
+    floor: ColorObject,
+
+    dust: ColorObject,
+
+    rng: ThreadRng,
 }
+
+const N_DUST: u32 = 30;
+const DUST_SCALE: Vec3 = Vec3::splat(0.01);
 
 const REFERENCE_DIAGONAL: f32 = 2202.0;
 const ORTHO_WIDTH: f32 = 2.0;
@@ -60,10 +66,30 @@ const ORTHO_HEIGHT: f32 = ORTHO_WIDTH;
 const ORTHO_NEAR: f32 = 0.003;
 const ORTHO_FAR: f32 = 1000.0;
 
-const NUM_PLANT_VARIATIONS: usize = 5;
+const N_PLANTS: u32 = 4;
+const PLANT_SPACING: i32 = 3;
 
 lazy_static::lazy_static! {
-    static ref CYLINDER_DATA: (Vec<Vertex>, Vec<u32>) = cylinder::generate(3);
+    static ref CYLINDER_DATA: (Vec<ColorVertex>, Vec<u32>) = gen_cylinder_data();
+}
+
+fn gen_cylinder_data() -> (Vec<ColorVertex>, Vec<u32>) {
+    let (vertices, indices) = cylinder::generate(3);
+    let vertices = vertices
+        .into_iter()
+        .map(ColorVertex::from)
+        .collect::<Vec<ColorVertex>>();
+    (vertices, indices)
+}
+
+fn cylinder(color: Vec3, mat: Mat4, index_offset: u32) -> (Vec<ColorVertex>, Vec<u32>) {
+    let (mut vertices, mut indices) = CYLINDER_DATA.clone();
+    vertices.iter_mut().for_each(|e| {
+        e.color = color;
+        e.position = mat.mul_vec4(e.position.extend(1.0)).truncate();
+    });
+    indices.iter_mut().for_each(|e| *e += index_offset);
+    (vertices, indices)
 }
 
 impl Application {
@@ -77,7 +103,6 @@ impl Application {
             pan_speed: 0.002 * (diagonal / REFERENCE_DIAGONAL),
             ..Default::default()
         };
-        // let controller = FreeCameraController::default();
         let controller: Box<dyn CameraController> = Box::new(controller);
         let mut camera = MatrixCameraBindGroup::with_controller(controller);
         camera.make_ortho(
@@ -88,11 +113,8 @@ impl Application {
             ORTHO_NEAR,
             ORTHO_FAR,
         );
-        // camera.make_perspective(35.0, aspect, 0.01, 10000.0);
-        // *camera.position() = Vec3::new(-30.0, 15.0, -0.0);
-        // *camera.direction() = Vec3::new(1.0, 0.0, 0.0).normalize();
-        *camera.position() = Vec3::new(-10.0, 10.0, -10.0);
-        *camera.direction() = Vec3::new(1.0, -1.0, 1.0).normalize();
+        *camera.position_mut() = Vec3::new(-9.5, 10.0, -9.5);
+        *camera.direction_mut() = Vec3::new(1.0, -1.0, 1.0).normalize();
         let camera = create_typed_bind_group(engine.renderer.as_mut(), camera);
 
         let shader: ShaderHandle = engine.renderer.create_shader(
@@ -110,83 +132,217 @@ impl Application {
                 .with_backface_culling(false),
         );
 
+        let default_shader: ShaderHandle = engine.renderer.create_shader(
+            ShaderDescriptor::default()
+                .with_descriptors(vec![Vertex::desc(), Instance::desc()])
+                .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
+                .with_depth(true)
+                .with_backface_culling(false),
+        );
+
         let depth_texture = engine.renderer.create_texture(TextureDescriptor {
             size: engine.renderer.size(),
             format: TextureFormat::Depth32F,
             ..Default::default()
         });
 
-        let mesh_renderer = MeshRenderer::new(engine.renderer.as_mut()).await;
+        let floor = ColorObject::quad(
+            engine.renderer.as_mut(),
+            Vec3::ZERO,
+            vec![Instance::default()
+                .rotate(90.0f32.to_radians(), Vec3::X)
+                .set_size(Vec3::splat(100.0))],
+        );
 
-        let intersection_instances = generate_intersections();
-        let road_instances = generate_roads();
+        let json = load_text(jandering_engine::utils::FilePath::FileName("lsystem.json"))
+            .await
+            .unwrap();
+        let l_config = LConfig::from_json(json);
 
-        let plants = make_plants(engine.renderer.as_mut()).await;
+        let mut plants = HashMap::new();
+        plants.reserve(50);
+
+        let dust_instances = (0..N_DUST)
+            .map(|_| {
+                Instance::default()
+                    .set_size(DUST_SCALE)
+                    .translate(Vec3::splat(-1000.0))
+            })
+            .collect();
+        let dust = ColorObject::quad(engine.renderer.as_mut(), Vec3::splat(0.3), dust_instances);
 
         Self {
             last_time: web_time::Instant::now(),
             time: 0.0,
             shader,
             camera,
+            camera_controller: Box::<FreeCameraController>::default(),
             depth_texture,
-            mesh_renderer,
-            intersection_instances,
-            road_instances,
+
+            default_shader,
 
             plants,
+            l_config,
+            floor,
+
+            dust,
+
+            rng: thread_rng(),
         }
+    }
+
+    fn spawn_new_plants(&mut self, renderer: &mut dyn Renderer) {
+        let camera = get_typed_bind_group(renderer, self.camera).unwrap();
+        if let Some(ground_pos) = camera_ground_intersection(camera.direction(), camera.position())
+        {
+            let snapped_cam = (ground_pos / PLANT_SPACING as f32).round() * PLANT_SPACING as f32;
+
+            let half = N_PLANTS as i32 / 2;
+            self.plants.retain(|_, obj| {
+                let half = (half * PLANT_SPACING) as f32;
+                let pos = obj.instances.first().unwrap().position();
+                (pos.x - snapped_cam.x).abs() <= half && (pos.z - snapped_cam.z).abs() <= half
+            });
+
+            for x in -half..half {
+                for z in -half..half {
+                    let pos = (
+                        snapped_cam.x as i32 + x * PLANT_SPACING,
+                        snapped_cam.z as i32 + z * PLANT_SPACING,
+                    );
+
+                    #[allow(clippy::map_entry)]
+                    if !self.plants.contains_key(&pos) {
+                        // let (vertices, indices) = self.new_plant(&mut self.rng.clone());
+                        let (vertices, indices) = self.new_plant2(&mut self.rng.clone());
+
+                        let object = ColorObject::new(
+                            renderer,
+                            vertices,
+                            indices,
+                            vec![Instance::default().translate(Vec3::new(
+                                pos.0 as f32,
+                                0.0,
+                                pos.1 as f32,
+                            ))],
+                        );
+                        self.plants.insert(pos, object);
+                    }
+                }
+            }
+        }
+    }
+
+    fn new_plant(&mut self, rng: &mut ThreadRng) -> (Vec<ColorVertex>, Vec<u32>) {
+        let timer = Timer::now("building took: ".to_string());
+
+        let l_system = LSystem::new(&self.l_config.rules, rng);
+
+        let shapes = l_system.build(&self.l_config.rendering, rng);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        timer.print();
+
+        let timer = Timer::now("meshing took: ".to_string());
+
+        for shape in shapes {
+            let (mut new_vertices, mut new_indices) =
+                shape_to_mesh_data(shape, vertices.len() as u32);
+            vertices.append(&mut new_vertices);
+            indices.append(&mut new_indices);
+        }
+
+        timer.print();
+
+        (vertices, indices)
+    }
+
+    fn new_plant2(&mut self, rng: &mut ThreadRng) -> (Vec<ColorVertex>, Vec<u32>) {
+        let timer = Timer::now("building took: ".to_string());
+
+        let shapes = l_system::test::build_lsystem(&self.l_config, rng);
+
+        let mut vertices = Vec::new();
+        let mut indices = Vec::new();
+
+        timer.print();
+
+        let timer = Timer::now("meshing took: ".to_string());
+
+        for shape in shapes {
+            let (mut new_vertices, mut new_indices) =
+                shape_to_mesh_data(shape, vertices.len() as u32);
+            vertices.append(&mut new_vertices);
+            indices.append(&mut new_indices);
+        }
+
+        timer.print();
+
+        (vertices, indices)
+    }
+
+    fn update_dust(&mut self, dt: f32, renderer: &mut dyn Renderer) {
+        let camera = get_typed_bind_group(renderer, self.camera).unwrap();
+        let ground_pos =
+            camera_ground_intersection(camera.direction(), camera.position()).unwrap_or(Vec3::ZERO);
+        let ground_pos = Vec2::new(ground_pos.x, ground_pos.z);
+
+        let idle_rotation = Qua::from_axis_angle(Vec3::Y, 3.0 * dt);
+
+        for dust in self.dust.instances.iter_mut() {
+            let mat = dust.mat();
+            let (mut scale, mut rotation, mut pos) = mat.to_scale_rotation_translation();
+            let mut pos_2d = Vec2::new(pos.x, pos.z);
+            if pos_2d.distance(ground_pos) > 3.0 || scale.x < 0.0 {
+                let dist = self.rng.gen_range(0.0f32..7.0f32);
+                let angle = self.rng.gen_range(0.0f32..360.0f32);
+
+                let offset = Vec2::from_angle(angle.to_radians()) * dist;
+                pos_2d = ground_pos + offset;
+                pos.y = -self.rng.gen_range(0.1..0.5);
+
+                scale = DUST_SCALE;
+
+                let angle = self.rng.gen_range(0.0f32..360.0f32);
+                rotation *= Qua::from_axis_angle(Vec3::Y, angle);
+            }
+
+            rotation *= idle_rotation;
+            pos.x = pos_2d.x;
+            pos.y += 0.1 * dt;
+            pos.z = pos_2d.y;
+
+            scale -= DUST_SCALE.x * dt * 0.2;
+
+            let mat = Mat4::from_scale_rotation_translation(scale, rotation, pos);
+            dust.set_mat(mat);
+        }
+
+        self.dust.update(renderer);
     }
 }
 
-async fn make_plants(renderer: &mut dyn Renderer) -> Vec<Plant> {
-    #[derive(Deserialize)]
-    struct Config {
-        rendering: RenderConfig,
-        rules: LSystemConfig,
+fn camera_ground_intersection(dir: Vec3, cam_pos: Vec3) -> Option<Vec3> {
+    let denom = Vec3::Y.dot(-dir);
+    if denom > 1e-6 {
+        let dif = -cam_pos;
+        let t = dif.dot(Vec3::Y) / denom;
+        Some(cam_pos - dir * t)
+    } else {
+        None
     }
-
-    let json = load_text(jandering_engine::utils::FilePath::FileName("lsystem.json"))
-        .await
-        .unwrap();
-    let (l_system, mut render_config) = match serde_json::from_str::<Config>(&json) {
-        Ok(config) => {
-            let l_system = LSystem::new(config.rules);
-            (l_system, config.rendering)
-        }
-        Err(e) => panic!("{}", e.to_string()),
-    };
-
-    let variations: [ColorObject; NUM_PLANT_VARIATIONS] = (0..NUM_PLANT_VARIATIONS)
-        .map(|_| {
-            let shapes = l_system.build(&render_config);
-            let mut vertices = Vec::new();
-            let mut indices = Vec::new();
-
-            for shape in shapes {
-                let (mut new_vertices, mut new_indices) =
-                    shape_to_mesh_data(shape, vertices.len() as u32);
-                vertices.append(&mut new_vertices);
-                indices.append(&mut new_indices);
-            }
-
-            ColorObject::new(renderer, vertices, indices, vec![Instance::default()])
-        })
-        .collect::<Vec<ColorObject>>()
-        .try_into()
-        .unwrap();
-
-    vec![Plant { variations }]
 }
 
 fn shape_to_mesh_data(shape: RenderShape, vertices_len: u32) -> (Vec<ColorVertex>, Vec<u32>) {
-    let (vertices, mut indices, mat, color) = match shape {
+    let (vertices, indices) = match shape {
         RenderShape::Line {
             start,
             end,
             width,
             color,
         } => {
-            let (vertices, indices) = CYLINDER_DATA.clone();
             let diff = end - start;
             let length = diff.length();
             let width = width * length * 0.01;
@@ -195,73 +351,16 @@ fn shape_to_mesh_data(shape: RenderShape, vertices_len: u32) -> (Vec<ColorVertex
                 Qua::from_rotation_arc(Vec3::Y, diff.normalize()),
                 start + diff * 0.5,
             );
-            (vertices, indices, mat, color)
+            let (vertices, indices) = cylinder(color, mat, vertices_len);
+            (vertices, indices)
         }
         RenderShape::Circle { size, pos, color } => {
-            let (vertices, indices) = icosphere::generate(0);
             let mat = Mat4::from_scale_rotation_translation(Vec3::splat(size), Qua::default(), pos);
-            (vertices, indices, mat, color)
+            let (vertices, indices) = icosphere::generate(color, mat, vertices_len);
+            (vertices, indices)
         }
     };
-
-    let vertices = vertices
-        .into_iter()
-        .map(|v| {
-            let mut v = ColorVertex::from(v);
-            v.position = mat.mul_vec4(v.position.extend(1.0)).truncate();
-            v.color = color;
-            v
-        })
-        .collect::<Vec<ColorVertex>>();
-    indices.iter_mut().for_each(|i| *i += vertices_len);
     (vertices, indices)
-}
-
-const N_INTERSECTIONS: i32 = 10;
-const ROAD_LEN: u32 = 5;
-const INTERSECTION_SPACING: f32 = ROAD_LEN as f32 + 1.0;
-fn generate_intersections() -> Vec<Instance> {
-    (-N_INTERSECTIONS..N_INTERSECTIONS + 1)
-        .flat_map(|x| {
-            (-N_INTERSECTIONS..N_INTERSECTIONS + 1)
-                .map(|y| {
-                    Instance::default()
-                        .translate(Vec3::new(x as f32, 0.0, y as f32) * INTERSECTION_SPACING)
-                })
-                .collect::<Vec<Instance>>()
-        })
-        .collect()
-}
-
-fn generate_roads() -> Vec<Instance> {
-    let mut instances = Vec::new();
-    let min_z = -N_INTERSECTIONS as f32 * INTERSECTION_SPACING;
-    (-N_INTERSECTIONS..N_INTERSECTIONS).for_each(|x| {
-        let x = x as f32 * INTERSECTION_SPACING + 1.0;
-        (0..N_INTERSECTIONS * 2 + 1).for_each(|z| {
-            (0..ROAD_LEN).for_each(|i| {
-                let pos = Vec3::new(x + i as f32, 0.0, min_z + z as f32 * INTERSECTION_SPACING);
-                instances.push(Instance::default().translate(pos));
-            })
-        });
-    });
-
-    let min_x = -N_INTERSECTIONS as f32 * INTERSECTION_SPACING;
-    (-N_INTERSECTIONS..N_INTERSECTIONS).for_each(|z| {
-        let z = z as f32 * INTERSECTION_SPACING + 1.0;
-        (0..N_INTERSECTIONS * 2 + 1).for_each(|x| {
-            (0..ROAD_LEN).for_each(|i| {
-                let pos = Vec3::new(min_x + x as f32 * INTERSECTION_SPACING, 0.0, z + i as f32);
-                instances.push(
-                    Instance::default()
-                        .rotate(std::f32::consts::PI * 0.5, Vec3::Y)
-                        .translate(pos),
-                );
-            })
-        });
-    });
-
-    instances
 }
 
 impl EventHandler for Application {
@@ -285,7 +384,7 @@ impl EventHandler for Application {
             *guard = None;
         }
 
-        if context.events.iter().any(|e| {
+        if context.events.matches(|e| {
             matches!(
                 e,
                 WindowEvent::KeyInput {
@@ -306,10 +405,60 @@ impl EventHandler for Application {
             });
         }
 
+        if context.events.matches(|e| {
+            matches!(
+                e,
+                WindowEvent::KeyInput {
+                    key: Key::F,
+                    state: InputState::Pressed
+                }
+            )
+        }) {
+            let aspect = {
+                let size = context.renderer.size();
+                let size = Vec2::new(size.x as f32, size.y as f32);
+                size.x / size.y
+            };
+            let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
+            std::mem::swap(
+                camera.controller.as_mut().unwrap(),
+                &mut self.camera_controller,
+            );
+            camera.make_perspective(35.0, aspect, 0.01, 10000.0);
+        }
+
+        if context.events.matches(|e| {
+            matches!(
+                e,
+                WindowEvent::KeyInput {
+                    key: Key::G,
+                    state: InputState::Pressed
+                }
+            )
+        }) {
+            let aspect = {
+                let size = context.renderer.size();
+                let size = Vec2::new(size.x as f32, size.y as f32);
+                size.x / size.y
+            };
+            let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
+            std::mem::swap(
+                camera.controller.as_mut().unwrap(),
+                &mut self.camera_controller,
+            );
+            camera.make_ortho(
+                (-ORTHO_WIDTH * aspect) / 2.0,
+                (ORTHO_WIDTH * aspect) / 2.0,
+                5.0 - ORTHO_HEIGHT / 2.0,
+                ORTHO_HEIGHT / 2.0,
+                ORTHO_NEAR,
+                ORTHO_FAR,
+            );
+        }
+
         if context
             .events
-            .iter()
-            .any(|e| matches!(e, WindowEvent::Resized(_)))
+            .matches(|e| matches!(e, WindowEvent::Resized(_)))
         {
             let aspect = {
                 let size = context.renderer.size();
@@ -338,11 +487,8 @@ impl EventHandler for Application {
         let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
         camera.update(context.events, dt);
 
-        self.mesh_renderer
-            .render_mesh(Mesh::Intersection, self.intersection_instances.clone());
-        self.mesh_renderer
-            .render_mesh(Mesh::Road, self.road_instances.clone());
-        self.mesh_renderer.update(context.renderer.as_mut());
+        self.spawn_new_plants(context.renderer.as_mut());
+        self.update_dust(dt, context.renderer.as_mut());
     }
 
     fn on_render(&mut self, renderer: &mut Box<dyn Renderer>) {
@@ -351,20 +497,18 @@ impl EventHandler for Application {
 
         let plants = self
             .plants
-            .iter()
-            .flat_map(|e| &e.variations)
+            .values()
             .map(|e| e as &dyn Renderable)
             .collect::<Vec<_>>();
 
-        let render_pass = renderer
+        renderer
             .new_pass()
             .with_depth(self.depth_texture, Some(1.0))
             .with_clear_color(0.2, 0.5, 1.0)
             .set_shader(self.shader)
-            .bind(0, self.camera.into());
-        self.mesh_renderer
-            .bind_meshes(render_pass)
+            .bind(0, self.camera.into())
             .render(&plants)
+            .render(&[&self.floor, &self.dust])
             .submit();
     }
 }

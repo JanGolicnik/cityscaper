@@ -1,6 +1,9 @@
 use jandering_engine::{
     core::{
-        object::{primitives::quad_data, Instance, ObjectRenderData, Renderable, Vertex},
+        object::{
+            primitives::{quad_data, triangle_data},
+            Instance, ObjectRenderData, Renderable, Vertex,
+        },
         renderer::{BufferHandle, Renderer},
         shader::{
             BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode,
@@ -99,6 +102,20 @@ impl ColorObject {
 
     pub fn quad(renderer: &mut dyn Renderer, color: Vec3, instances: Vec<Instance>) -> Self {
         let (vertices, indices) = quad_data();
+        let vertices = vertices
+            .into_iter()
+            .map(|e| {
+                let mut v = ColorVertex::from(e);
+                v.color = color;
+                v
+            })
+            .collect();
+
+        Self::new(renderer, vertices, indices, instances)
+    }
+
+    pub fn triangle(renderer: &mut dyn Renderer, color: Vec3, instances: Vec<Instance>) -> Self {
+        let (vertices, indices) = triangle_data();
         let vertices = vertices
             .into_iter()
             .map(|e| {

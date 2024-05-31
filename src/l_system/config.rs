@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::builder::RenderConfig;
+use super::RenderConfig;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -48,7 +48,7 @@ mod json {
 
     use serde::Deserialize;
 
-    use crate::l_system::builder::RenderConfig;
+    use crate::l_system::RenderConfig;
 
     use super::{LRule, LSymbol, LSystemBuildConfig, Value};
 
@@ -203,7 +203,6 @@ impl LConfig {
             serde_json::from_str::<json::LConfigJSON>(&json).unwrap();
 
         let rules = rules.into();
-        log::info!("{:?}", rules);
         Self { rendering, rules }
     }
 }

@@ -1,18 +1,20 @@
+use image::GenericImageView;
 use jandering_engine::{
     core::{
         bind_group::{
             camera::free::{CameraController, FreeCameraController, MatrixCameraBindGroup},
+            texture::TextureBindGroup,
             BindGroup,
         },
         engine::{Engine, EngineContext},
         event_handler::EventHandler,
-        object::{Instance, Renderable, Vertex},
+        object::{Instance, Object, Renderable, Vertex},
         renderer::{
             create_typed_bind_group, get_typed_bind_group, get_typed_bind_group_mut,
             BindGroupHandle, Renderer, ShaderHandle, TextureHandle,
         },
         shader::ShaderDescriptor,
-        texture::{TextureDescriptor, TextureFormat},
+        texture::{sampler::SamplerDescriptor, TextureDescriptor, TextureFormat},
         window::{InputState, Key, WindowEvent},
     },
     types::{Mat4, Qua, Vec2, Vec3},
@@ -28,7 +30,8 @@ use crate::{
     camera_controller::IsometricCameraController,
     color_obj::{ColorObject, ColorVertex},
     cylinder, icosphere,
-    l_system::{self, builder::RenderShape, config::LConfig, LSystem},
+    image::Image,
+    l_system::{self, config::LConfig, RenderShape},
     timer::Timer,
 };
 
@@ -41,24 +44,26 @@ pub struct Application {
     last_time: web_time::Instant,
     time: f32,
     shader: ShaderHandle,
+    floor_shader: ShaderHandle,
+    grass_shader: ShaderHandle,
     camera: BindGroupHandle<MatrixCameraBindGroup>,
     camera_controller: Box<dyn CameraController>,
     depth_texture: TextureHandle,
 
-    #[allow(dead_code)]
-    default_shader: ShaderHandle,
-
     plants: HashMap<(i32, i32), ColorObject>,
     l_config: LConfig,
-    floor: ColorObject,
+    floor: Object<Instance>,
 
     dust: ColorObject,
+    grass: ColorObject,
+    noise_image: Image,
+    noise_texture: BindGroupHandle<TextureBindGroup>,
 
     rng: ThreadRng,
 }
 
-const N_DUST: u32 = 30;
-const DUST_SCALE: Vec3 = Vec3::splat(0.01);
+const N_DUST: u32 = 60;
+const DUST_SCALE: Vec3 = Vec3::splat(0.0085);
 
 const REFERENCE_DIAGONAL: f32 = 2202.0;
 const ORTHO_WIDTH: f32 = 2.0;
@@ -68,6 +73,9 @@ const ORTHO_FAR: f32 = 1000.0;
 
 const N_PLANTS: u32 = 4;
 const PLANT_SPACING: i32 = 3;
+
+const GRASS_RANGE: f32 = 2.75;
+const GRASS_ITERATIONS: u32 = 9;
 
 lazy_static::lazy_static! {
     static ref CYLINDER_DATA: (Vec<ColorVertex>, Vec<u32>) = gen_cylinder_data();
@@ -117,28 +125,7 @@ impl Application {
         *camera.direction_mut() = Vec3::new(1.0, -1.0, 1.0).normalize();
         let camera = create_typed_bind_group(engine.renderer.as_mut(), camera);
 
-        let shader: ShaderHandle = engine.renderer.create_shader(
-            ShaderDescriptor::default()
-                .with_source(jandering_engine::core::shader::ShaderSource::Code(
-                    load_text(jandering_engine::utils::FilePath::FileName(
-                        "shaders/shader.wgsl",
-                    ))
-                    .await
-                    .unwrap(),
-                ))
-                .with_descriptors(vec![ColorVertex::desc(), Instance::desc()])
-                .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
-                .with_depth(true)
-                .with_backface_culling(false),
-        );
-
-        let default_shader: ShaderHandle = engine.renderer.create_shader(
-            ShaderDescriptor::default()
-                .with_descriptors(vec![Vertex::desc(), Instance::desc()])
-                .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
-                .with_depth(true)
-                .with_backface_culling(false),
-        );
+        let (shader, floor_shader, grass_shader) = create_shaders(engine.renderer.as_mut()).await;
 
         let depth_texture = engine.renderer.create_texture(TextureDescriptor {
             size: engine.renderer.size(),
@@ -146,9 +133,8 @@ impl Application {
             ..Default::default()
         });
 
-        let floor = ColorObject::quad(
+        let floor = Object::quad(
             engine.renderer.as_mut(),
-            Vec3::ZERO,
             vec![Instance::default()
                 .rotate(90.0f32.to_radians(), Vec3::X)
                 .set_size(Vec3::splat(100.0))],
@@ -171,6 +157,35 @@ impl Application {
             .collect();
         let dust = ColorObject::quad(engine.renderer.as_mut(), Vec3::splat(0.3), dust_instances);
 
+        let noise_image = image::load_from_memory(include_bytes!("../res/noise.png")).unwrap();
+        let noise_texture = {
+            let tex_sampler = engine.renderer.create_sampler(SamplerDescriptor {
+                address_mode: jandering_engine::core::texture::sampler::SamplerAddressMode::Repeat,
+                ..Default::default()
+            });
+            let noise_handle = engine.renderer.create_texture(TextureDescriptor {
+                data: Some(&noise_image.to_rgba8()),
+                size: noise_image.dimensions().into(),
+                format: TextureFormat::Rgba8U,
+                ..Default::default()
+            });
+            let noise_texture =
+                TextureBindGroup::new(engine.renderer.as_mut(), noise_handle, tex_sampler);
+            create_typed_bind_group(engine.renderer.as_mut(), noise_texture)
+        };
+        let noise_image = Image::new(noise_image.to_rgb32f(), 0.1);
+
+        let rng = thread_rng();
+
+        let dust2_instances = (0..625)
+            .map(|_| {
+                Instance::default()
+                    .set_size(Vec3::new(0.008, 0.1, 1.0))
+                    .set_position(Vec3::new(1000.0, 0.0, 0.0))
+            })
+            .collect::<Vec<_>>();
+        let grass = ColorObject::quad(engine.renderer.as_mut(), Vec3::splat(0.3), dust2_instances);
+
         Self {
             last_time: web_time::Instant::now(),
             time: 0.0,
@@ -179,15 +194,19 @@ impl Application {
             camera_controller: Box::<FreeCameraController>::default(),
             depth_texture,
 
-            default_shader,
+            grass_shader,
+            floor_shader,
 
             plants,
             l_config,
             floor,
 
             dust,
+            grass,
+            noise_image,
+            noise_texture,
 
-            rng: thread_rng(),
+            rng,
         }
     }
 
@@ -213,8 +232,7 @@ impl Application {
 
                     #[allow(clippy::map_entry)]
                     if !self.plants.contains_key(&pos) {
-                        // let (vertices, indices) = self.new_plant(&mut self.rng.clone());
-                        let (vertices, indices) = self.new_plant2(&mut self.rng.clone());
+                        let (vertices, indices) = self.new_plant(&mut self.rng.clone());
 
                         let object = ColorObject::new(
                             renderer,
@@ -236,33 +254,7 @@ impl Application {
     fn new_plant(&mut self, rng: &mut ThreadRng) -> (Vec<ColorVertex>, Vec<u32>) {
         let timer = Timer::now("building took: ".to_string());
 
-        let l_system = LSystem::new(&self.l_config.rules, rng);
-
-        let shapes = l_system.build(&self.l_config.rendering, rng);
-
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-
-        timer.print();
-
-        let timer = Timer::now("meshing took: ".to_string());
-
-        for shape in shapes {
-            let (mut new_vertices, mut new_indices) =
-                shape_to_mesh_data(shape, vertices.len() as u32);
-            vertices.append(&mut new_vertices);
-            indices.append(&mut new_indices);
-        }
-
-        timer.print();
-
-        (vertices, indices)
-    }
-
-    fn new_plant2(&mut self, rng: &mut ThreadRng) -> (Vec<ColorVertex>, Vec<u32>) {
-        let timer = Timer::now("building took: ".to_string());
-
-        let shapes = l_system::test::build_lsystem(&self.l_config, rng);
+        let shapes = l_system::build(&self.l_config, rng);
 
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
@@ -295,13 +287,13 @@ impl Application {
             let mat = dust.mat();
             let (mut scale, mut rotation, mut pos) = mat.to_scale_rotation_translation();
             let mut pos_2d = Vec2::new(pos.x, pos.z);
-            if pos_2d.distance(ground_pos) > 3.0 || scale.x < 0.0 {
+            if pos_2d.distance(ground_pos) > 7.0 || scale.x < 0.0 {
                 let dist = self.rng.gen_range(0.0f32..7.0f32);
                 let angle = self.rng.gen_range(0.0f32..360.0f32);
 
                 let offset = Vec2::from_angle(angle.to_radians()) * dist;
                 pos_2d = ground_pos + offset;
-                pos.y = -self.rng.gen_range(0.1..0.5);
+                pos.y = self.rng.gen_range(-0.5..0.5);
 
                 scale = DUST_SCALE;
 
@@ -321,6 +313,54 @@ impl Application {
         }
 
         self.dust.update(renderer);
+    }
+
+    fn update_grass(&mut self, dt: f32, renderer: &mut dyn Renderer) {
+        let camera = get_typed_bind_group(renderer, self.camera).unwrap();
+        let ground_pos =
+            camera_ground_intersection(camera.direction(), camera.position()).unwrap_or(Vec3::ZERO);
+        let ground_pos = Vec2::new(ground_pos.x, ground_pos.z);
+
+        for grass in self.grass.instances.iter_mut() {
+            let mat = grass.mat();
+            let (scale, rotation, mut pos) = mat.to_scale_rotation_translation();
+            let mut pos_2d = Vec2::new(pos.x, pos.z);
+            if pos_2d.distance(ground_pos) > GRASS_RANGE {
+                let dist = self.rng.gen_range(0.9f32..1.0f32);
+                let angle = self.rng.gen_range(0.0f32..360.0f32);
+
+                let offset = Vec2::from_angle(angle.to_radians()) * dist * GRASS_RANGE;
+                pos_2d = ground_pos + offset;
+
+                pos.x = pos_2d.x;
+                pos.z = pos_2d.y;
+
+                pos = Self::place_pos_on_heightmap(pos, GRASS_ITERATIONS, &self.noise_image);
+                pos.y = 0.0;
+
+                let mat = Mat4::from_scale_rotation_translation(scale, rotation, pos);
+                grass.set_mat(mat);
+            }
+        }
+
+        self.grass.update(renderer);
+    }
+
+    fn place_pos_on_heightmap(mut pos: Vec3, iterations: u32, heightmap: &Image) -> Vec3 {
+        for _ in 0..=iterations {
+            let mut highest_val = heightmap.sample(pos.x, pos.z);
+            for i in -1..1 {
+                for j in -1..1 {
+                    let this_pos = pos + Vec3::new(j as f32 * 0.01, 0.0, i as f32 * 0.01);
+                    let val = heightmap.sample(this_pos.x, this_pos.z);
+                    if val > highest_val {
+                        highest_val = val;
+                        pos = this_pos;
+                    }
+                }
+            }
+        }
+        pos
     }
 }
 
@@ -489,6 +529,7 @@ impl EventHandler for Application {
 
         self.spawn_new_plants(context.renderer.as_mut());
         self.update_dust(dt, context.renderer.as_mut());
+        self.update_grass(dt, context.renderer.as_mut());
     }
 
     fn on_render(&mut self, renderer: &mut Box<dyn Renderer>) {
@@ -508,7 +549,69 @@ impl EventHandler for Application {
             .set_shader(self.shader)
             .bind(0, self.camera.into())
             .render(&plants)
-            .render(&[&self.floor, &self.dust])
+            .render(&[&self.dust])
+            .set_shader(self.grass_shader)
+            .bind(1, self.noise_texture.into())
+            .render(&[&self.grass])
+            .set_shader(self.floor_shader)
+            .render(&[&self.floor])
             .submit();
     }
+}
+
+async fn create_shaders(renderer: &mut dyn Renderer) -> (ShaderHandle, ShaderHandle, ShaderHandle) {
+    let shader: ShaderHandle = renderer.create_shader(
+        ShaderDescriptor::default()
+            .with_source(jandering_engine::core::shader::ShaderSource::Code(
+                load_text(jandering_engine::utils::FilePath::FileName(
+                    "shaders/shader.wgsl",
+                ))
+                .await
+                .unwrap(),
+            ))
+            .with_descriptors(vec![ColorVertex::desc(), Instance::desc()])
+            .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
+            .with_depth(true)
+            .with_fs_entry("fs_color_object")
+            .with_backface_culling(false),
+    );
+    let floor_shader: ShaderHandle = renderer.create_shader(
+        ShaderDescriptor::default()
+            .with_source(jandering_engine::core::shader::ShaderSource::Code(
+                load_text(jandering_engine::utils::FilePath::FileName(
+                    "shaders/shader.wgsl",
+                ))
+                .await
+                .unwrap(),
+            ))
+            .with_descriptors(vec![Vertex::desc(), Instance::desc()])
+            .with_bind_group_layouts(vec![
+                MatrixCameraBindGroup::get_layout(),
+                TextureBindGroup::get_layout(),
+            ])
+            .with_depth(true)
+            .with_fs_entry("fs_floor")
+            .with_backface_culling(false),
+    );
+    let grass_shader: ShaderHandle = renderer.create_shader(
+        ShaderDescriptor::default()
+            .with_source(jandering_engine::core::shader::ShaderSource::Code(
+                load_text(jandering_engine::utils::FilePath::FileName(
+                    "shaders/shader.wgsl",
+                ))
+                .await
+                .unwrap(),
+            ))
+            .with_descriptors(vec![ColorVertex::desc(), Instance::desc()])
+            .with_bind_group_layouts(vec![
+                MatrixCameraBindGroup::get_layout(),
+                TextureBindGroup::get_layout(),
+            ])
+            .with_depth(true)
+            .with_depth(true)
+            .with_fs_entry("fs_grass")
+            .with_backface_culling(false),
+    );
+
+    (shader, floor_shader, grass_shader)
 }

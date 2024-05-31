@@ -9,6 +9,6 @@ impl Timer {
     }
 
     pub fn print(self) {
-        log::info!("{}: {}", self.0, (Instant::now() - self.1).as_secs_f32());
+        log::info!("{}: {}ms", self.0, (Instant::now() - self.1).as_millis());
     }
 }

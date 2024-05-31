@@ -36,6 +36,7 @@ struct VertexOutput{
     @builtin(position) clip_position: vec4<f32>,
     @location(1) normal: vec3<f32>,
     @location(0) color: vec3<f32>,
+    @location(2) world_pos: vec3<f32>,
 };
 
 @vertex
@@ -65,13 +66,14 @@ fn vs_main(
     out.clip_position = camera.view_proj * world_position;
     out.normal = normalize(normal.xyz);
     out.color = model.color;
+    out.world_pos = world_position.xyz;
     
     return out;
 }
 
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
+fn fs_color_object(in: VertexOutput) -> @location(0) vec4<f32>{
     let light_dir = vec3<f32>(-1.0);
 
     let d = max(dot(light_dir, in.normal), 0.0);
@@ -79,3 +81,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
 
     return vec4<f32>(in.color , 1.0);
 }
+
+@fragment
+fn fs_floor(in: VertexOutput) -> @location(0) vec4<f32>{
+    let uv = in.world_pos * 0.1;
+    let color = textureSample(tex, tex_sampler, uv.xz);
+
+    return vec4<f32>(color.rgb * 0.02, 1.0);
+}
+
+@fragment
+fn fs_grass(in: VertexOutput) -> @location(0) vec4<f32>{
+    let uv = in.world_pos * 0.1;
+    var color = textureSample(tex, tex_sampler, uv.xz).r * 0.02;
+
+    let t = min(in.world_pos.y / 0.1, 1.0);
+    color += t * t * t * 0.65 * (0.5 + color * 0.5);
+    return vec4<f32>(vec3<f32>(color), 1.0);
+}
+
+

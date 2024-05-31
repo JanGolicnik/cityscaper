@@ -6,6 +6,7 @@ mod camera_controller;
 mod color_obj;
 mod cylinder;
 mod icosphere;
+mod image;
 mod l_system;
 mod timer;
 

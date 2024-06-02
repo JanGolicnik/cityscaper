@@ -59,6 +59,7 @@ pub struct Application {
     floor: Object<Instance>,
 
     dust: AgeObject,
+    dust_shader: ShaderHandle,
     grass: AgeObject,
     noise_image: Image,
     noise_texture: BindGroupHandle<TextureBindGroup>,
@@ -83,7 +84,8 @@ const ORTHO_FAR: f32 = 1000.0;
 
 impl Application {
     pub async fn new(engine: &mut Engine) -> Self {
-        let (shader, floor_shader, grass_shader) = create_shaders(engine.renderer.as_mut()).await;
+        let (shader, floor_shader, grass_shader, dust_shader) =
+            create_shaders(engine.renderer.as_mut()).await;
 
         let (
             depth_texture,
@@ -124,6 +126,7 @@ impl Application {
             floor,
 
             dust,
+            dust_shader,
             grass,
             noise_image,
             noise_texture,
@@ -250,6 +253,8 @@ impl EventHandler for Application {
             Some(self.lut_sampler),
         );
 
+        self.update_iteration_count();
+
         let render_data =
             get_typed_bind_group_mut(context.renderer.as_mut(), self.render_data).unwrap();
         render_data.data.time = self.time;
@@ -281,6 +286,7 @@ impl EventHandler for Application {
             .render(&[&self.floor])
             .set_shader(self.shader)
             .render(&plants)
+            .set_shader(self.dust_shader)
             .render(&[&self.dust])
             .bind(3, self.lut_texture_linear.into())
             .set_shader(self.grass_shader)

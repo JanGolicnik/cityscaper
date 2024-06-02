@@ -50,6 +50,7 @@ pub fn build(config: &LConfig, rng: &mut ThreadRng) -> Vec<RenderShape> {
         ..Default::default()
     }];
 
+    log::info!("built with iterations: {}", config.rules.iterations);
     let mut shapes = Vec::new();
 
     build_symbols(

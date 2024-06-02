@@ -141,8 +141,7 @@ impl Application {
 
                 let offset = Vec2::from_angle(angle.to_radians()) * dist;
                 pos_2d = ground_pos + offset;
-                pos.y = self.rng.gen_range(-0.5..0.5);
-
+                pos.y = self.rng.gen_range(-0.5..0.0);
                 scale = DUST_SCALE;
 
                 let angle = self.rng.gen_range(0.0f32..360.0f32);
@@ -228,6 +227,21 @@ impl Application {
             0.0,
             rng.gen_range(-0.05..=0.05),
         )
+    }
+
+    pub fn update_iteration_count(&mut self) {
+        if let Some(value) = web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| doc.get_element_by_id("detail"))
+            .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
+            .map(|el| el.value())
+            .and_then(|value| value.parse::<u32>().ok())
+        {
+            if self.l_config.rules.iterations != value {
+                self.plants.clear();
+                self.l_config.rules.iterations = value;
+            }
+        }
     }
 }
 

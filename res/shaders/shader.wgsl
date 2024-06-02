@@ -56,6 +56,7 @@ struct VertexOutput{
     @location(0) normal: vec3<f32>,
     @location(1) age: f32,
     @location(2) world_pos: vec3<f32>,
+    @location(3) scale: vec3<f32>,
 };
 
 @vertex
@@ -79,7 +80,12 @@ fn vs_main(
     );
 
     var world_position = model_matrix * vec4<f32>(model.position, 1.0);
-    let normal = transpose(inv_model_matrix) * vec4<f32>(model.normal, 1.0);    
+    let normal = transpose(inv_model_matrix) * vec4<f32>(model.normal, 1.0);
+
+    let scale1 = length(vec3<f32>(instance.model_matrix_0.x, instance.model_matrix_1.x, instance.model_matrix_2.x));
+    let scale2 = length(vec3<f32>(instance.model_matrix_0.y, instance.model_matrix_1.y, instance.model_matrix_2.y));
+    let scale3 = length(vec3<f32>(instance.model_matrix_0.z, instance.model_matrix_1.z, instance.model_matrix_2.z));
+    let scale = vec3<f32>(scale1, scale2, scale3);
 
     let wind = calculate_wind(world_position.xz);
     let t = min(world_position.y / 0.1, 1.0);
@@ -91,6 +97,7 @@ fn vs_main(
     out.normal = normalize(normal.xyz);
     out.age = model.age;
     out.world_pos = world_position.xyz;
+    out.scale = scale;
     
     return out;
 }
@@ -116,9 +123,16 @@ fn fs_color_object(in: VertexOutput) -> @location(0) vec4<f32>{
 
     let lut = textureSample(lut_tex, lut_tex_sampler, vec2<f32>(in.age, 0.5)).rgb;
 
-    var color = lut * t + vec3<f32>(ground * (1.0 - t));
-    color *= get_shadow(in.normal);
-    // return vec4<f32>(vec3<f32>(ground), 1.0);
+    let color = lut * t * get_shadow(in.normal) + vec3<f32>(ground * (1.0 - t));
+
+    return vec4<f32>(color, 1.0);
+}
+
+@fragment
+fn fs_dust(in: VertexOutput) -> @location(0) vec4<f32>{
+    let t = 1.0 - in.scale.x / 0.01;
+    let color = textureSample(lut_tex, lut_tex_sampler, vec2<f32>(t, 0.5)).rgb;
+    // return vec4<f32>(vec3<f32>(in.scale.x/ 0.0085), 1.0);
     return vec4<f32>(color, 1.0);
 }
 

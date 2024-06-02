@@ -1,28 +1,20 @@
 {
   "rules": {
-    "iterations": 12,
+    "iterations": 2,
     "initial": "A",
     "rules": {
       "A": [
         {
           "result": "f[RA]",
-          "chance": 0.3,
-          "max_gen": 14
+          "chance": 0.3
         },
         {
           "result": "f[RA][RA]",
-          "chance": 0.4,
-          "max_gen": 14
+          "chance": 0.4
         },
         {
           "result": "f[RA][RA][RA]",
-          "chance": 0.3,
-          "max_gen": 14
-        },
-        {
-          "result": "s",
-          "chance": 0.02,
-          "min_gen": 14
+          "chance": 0.3
         }
       ],
       "R": [

@@ -131,7 +131,7 @@ pub async fn create_textures(
 
 pub async fn create_shaders(
     renderer: &mut dyn Renderer,
-) -> (ShaderHandle, ShaderHandle, ShaderHandle) {
+) -> (ShaderHandle, ShaderHandle, ShaderHandle, ShaderHandle) {
     let descriptor = ShaderDescriptor::default()
         .with_source(jandering_engine::core::shader::ShaderSource::Code(
             load_text(jandering_engine::utils::FilePath::FileName(
@@ -142,43 +142,27 @@ pub async fn create_shaders(
         ))
         .with_descriptors(vec![AgeVertex::desc(), Instance::desc()])
         .with_depth(true)
-        .with_backface_culling(false);
-    let shader: ShaderHandle = renderer.create_shader(
-        descriptor
-            .clone()
-            .with_bind_group_layouts(vec![
-                MatrixCameraBindGroup::get_layout(),
-                RenderDataBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-            ])
-            .with_fs_entry("fs_color_object"),
-    );
+        .with_backface_culling(false)
+        .with_bind_group_layouts(vec![
+            MatrixCameraBindGroup::get_layout(),
+            RenderDataBindGroup::get_layout(),
+            TextureBindGroup::get_layout(),
+            TextureBindGroup::get_layout(),
+        ]);
+    let shader: ShaderHandle =
+        renderer.create_shader(descriptor.clone().with_fs_entry("fs_color_object"));
     let floor_shader: ShaderHandle = renderer.create_shader(
         descriptor
             .clone()
             .with_descriptors(vec![Vertex::desc(), Instance::desc()])
-            .with_bind_group_layouts(vec![
-                MatrixCameraBindGroup::get_layout(),
-                RenderDataBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-            ])
             .with_fs_entry("fs_floor"),
     );
-    let grass_shader: ShaderHandle = renderer.create_shader(
-        descriptor
-            .clone()
-            .with_bind_group_layouts(vec![
-                MatrixCameraBindGroup::get_layout(),
-                RenderDataBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-                TextureBindGroup::get_layout(),
-            ])
-            .with_fs_entry("fs_grass"),
-    );
+    let grass_shader: ShaderHandle =
+        renderer.create_shader(descriptor.clone().with_fs_entry("fs_grass"));
+    let dust_shader: ShaderHandle =
+        renderer.create_shader(descriptor.clone().with_fs_entry("fs_dust"));
 
-    (shader, floor_shader, grass_shader)
+    (shader, floor_shader, grass_shader, dust_shader)
 }
 
 pub fn create_lut_textures(

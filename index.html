@@ -78,7 +78,7 @@
         width: 2rem;
         height: 2rem;
       }
-      input.color-stop-age{
+      input.color-stop-age, input#detail{
         all:unset;
         width: 2rem;
         height: 2rem;
@@ -88,6 +88,9 @@
         padding: 0;
         padding-left: 0.33rem;
         background: none;
+      }
+      input#detail{
+        padding-left: 0;
       }
       .button{
         all: unset;
@@ -108,11 +111,13 @@
         display:none;
       }
       #settings{
+        display: flex;
+        flex-direction: column;
+        align-items: start;
         transition-delay: 0.2s;
         transition: transform 1s;
       }
       #settings.hidden{
-        display:block;
         transform: translate(-120%, 0);
       }
       .on-top{
@@ -125,7 +130,7 @@
         display: flex;
         gap: 0;
         padding: 0;
-        margin-left: 0.85rem;
+        margin-left: 1rem;
       }
       .grabbable{
         cursor:grab;
@@ -151,6 +156,10 @@
       </button>
       
       <div id="settings">
+        <div >
+          detail:
+          <input  id="detail" type="number" value="10"></input>
+        </div>
         <div id="gradient-creator">
           <div class="color-stop ui-state-default">
             <span class="grabbable">|</span>

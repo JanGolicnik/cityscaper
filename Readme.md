@@ -1,9 +1,11 @@
-# Lsystem showcase
+# Void garden
 
-Made a simple thing to showcase my improved rendering engine, everything is so simple now :)
+After fiddling around with 2D LSystems I really wanted to make something 3D and this is it, the new LSystem generation is way more sophisticated and cleaner than the pervious one and is really fun to work with.
 
-LSystems are really cool tho and I wanted to implement one myself since forever
+![first image](./pic1.png)
 
-Try it live [here](https://janyg.itch.io/lsystem-editor)
+Currently there is only one type of tree as I'm still trying to figure out how I could procedurally generate LSystems :P for truly infinite variation.
 
-Main inspiration was [this](https://www.youtube.com/watch?v=1hcCpLQwI-c) video
+I made it into a cute app where you can explore infinitely plus alter the color scheme for some additional fun.
+
+![second image](./pic2.png)

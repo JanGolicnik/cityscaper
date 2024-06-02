@@ -9,3 +9,5 @@ Currently there is only one type of tree as I'm still trying to figure out how I
 I made it into a cute app where you can explore infinitely plus alter the color scheme for some additional fun.
 
 ![second image](./pic2.png)
+
+I plan on adding little paths, maybe simple cratures and possibly more particles just to make it a bit more fun!

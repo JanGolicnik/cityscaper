@@ -43,6 +43,7 @@ pub struct LConfig {
     pub rendering: RenderConfig,
     pub rules: LSystemBuildConfig,
 }
+
 mod json {
     use std::collections::HashMap;
 

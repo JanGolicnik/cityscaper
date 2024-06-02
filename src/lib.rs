@@ -8,6 +8,7 @@ mod cylinder;
 mod icosphere;
 mod image;
 mod l_system;
+mod render_data;
 mod timer;
 
 use wasm_bindgen::prelude::*;

@@ -25,6 +25,8 @@ web-sys = { version = "0.3", features = [
     "Element",
     "HtmlInputElement",
     "HtmlTextAreaElement",
+    "HtmlDivElement",
+    "HtmlCollection",
     "Document",
     "Screen",
 ]}
@@ -35,6 +37,7 @@ regex = "1.10.4"
 is_none_or = "0.1.0"
 prev-iter = "0.2.0"
 image = "0.25.1"
+hex_color = "3.0.0"
 
 [dependencies.jandering_engine]
 path = "../jandering_engine"

@@ -1,9 +1,6 @@
 use jandering_engine::{
     core::{
-        object::{
-            primitives::{quad_data, triangle_data},
-            Instance, ObjectRenderData, Renderable, Vertex,
-        },
+        object::{primitives::quad_data, Instance, ObjectRenderData, Renderable, Vertex},
         renderer::{BufferHandle, Renderer},
         shader::{
             BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode,
@@ -14,16 +11,14 @@ use jandering_engine::{
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Debug, Default)]
-pub struct ColorVertex {
+pub struct AgeVertex {
     pub position: Vec3,
     pub position_padding: f32,
     pub normal: Vec3,
-    pub normal_padding: f32,
-    pub color: Vec3,
-    pub color_padding: f32,
+    pub age: f32,
 }
 
-impl ColorVertex {
+impl AgeVertex {
     pub fn desc() -> BufferLayout {
         BufferLayout {
             step_mode: BufferLayoutStepMode::Vertex,
@@ -34,11 +29,11 @@ impl ColorVertex {
                 },
                 BufferLayoutEntry {
                     location: 1,
-                    data_type: BufferLayoutEntryDataType::Float32x4,
+                    data_type: BufferLayoutEntryDataType::Float32x3,
                 },
                 BufferLayoutEntry {
                     location: 2,
-                    data_type: BufferLayoutEntryDataType::Float32x4,
+                    data_type: BufferLayoutEntryDataType::Float32,
                 },
             ],
         }
@@ -46,8 +41,8 @@ impl ColorVertex {
 }
 
 #[derive(Debug)]
-pub struct ColorObject {
-    pub vertices: Vec<ColorVertex>,
+pub struct AgeObject {
+    pub vertices: Vec<AgeVertex>,
     //
     pub indices: Vec<u32>,
     //
@@ -58,10 +53,10 @@ pub struct ColorObject {
     previous_instances_len: usize,
 }
 
-impl ColorObject {
+impl AgeObject {
     pub fn new(
         renderer: &mut dyn Renderer,
-        vertices: Vec<ColorVertex>,
+        vertices: Vec<AgeVertex>,
         indices: Vec<u32>,
         instances: Vec<Instance>,
     ) -> Self {
@@ -100,27 +95,13 @@ impl ColorObject {
         }
     }
 
-    pub fn quad(renderer: &mut dyn Renderer, color: Vec3, instances: Vec<Instance>) -> Self {
+    pub fn quad(renderer: &mut dyn Renderer, age: f32, instances: Vec<Instance>) -> Self {
         let (vertices, indices) = quad_data();
         let vertices = vertices
             .into_iter()
             .map(|e| {
-                let mut v = ColorVertex::from(e);
-                v.color = color;
-                v
-            })
-            .collect();
-
-        Self::new(renderer, vertices, indices, instances)
-    }
-
-    pub fn triangle(renderer: &mut dyn Renderer, color: Vec3, instances: Vec<Instance>) -> Self {
-        let (vertices, indices) = triangle_data();
-        let vertices = vertices
-            .into_iter()
-            .map(|e| {
-                let mut v = ColorVertex::from(e);
-                v.color = color;
+                let mut v = AgeVertex::from(e);
+                v.age = age;
                 v
             })
             .collect();
@@ -129,7 +110,7 @@ impl ColorObject {
     }
 }
 
-impl Renderable for ColorObject {
+impl Renderable for AgeObject {
     fn num_instances(&self) -> u32 {
         self.previous_instances_len as u32
     }
@@ -147,9 +128,9 @@ impl Renderable for ColorObject {
     }
 }
 
-impl From<Vertex> for ColorVertex {
+impl From<Vertex> for AgeVertex {
     fn from(v: Vertex) -> Self {
-        ColorVertex {
+        AgeVertex {
             position: v.position,
             normal: v.normal,
             ..Default::default()

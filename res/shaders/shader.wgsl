@@ -1,23 +1,42 @@
 struct Camera {
-    up: vec3<f32>,
-    right: vec3<f32>,
-    position: vec3<f32>,
-    direction: vec3<f32>,
+    up: vec4<f32>,
+    right: vec4<f32>,
+    position: vec4<f32>,
+    direction: vec4<f32>,
     view_proj: mat4x4<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
+struct RenderData {
+    time: f32,
+    wind_strength: f32,
+    wind_scale: f32,
+    wind_speed: f32,
+    wind_direction: f32,
+    wind_noise_scale: f32,
+    wind_noise_strength: f32,
+    padding: f32
+};
+
 @group(1) @binding(0)
+var<uniform> render_data: RenderData;
+
+@group(2) @binding(0)
 var tex: texture_2d<f32>;
-@group(1) @binding(1)
+@group(2) @binding(1)
 var tex_sampler: sampler;
+
+@group(3) @binding(0)
+var lut_tex: texture_2d<f32>;
+@group(3) @binding(1)
+var lut_tex_sampler: sampler;
 
 struct VertexInput{
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) color: vec3<f32>,
+    @location(2) age: f32,
 };
 
 struct InstanceInput{
@@ -34,8 +53,8 @@ struct InstanceInput{
 
 struct VertexOutput{
     @builtin(position) clip_position: vec4<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) age: f32,
     @location(2) world_pos: vec3<f32>,
 };
 
@@ -59,45 +78,75 @@ fn vs_main(
         instance.inv_model_matrix_3,
     );
 
-    let world_position = model_matrix * vec4<f32>(model.position, 1.0);
+    var world_position = model_matrix * vec4<f32>(model.position, 1.0);
     let normal = transpose(inv_model_matrix) * vec4<f32>(model.normal, 1.0);    
+
+    let wind = calculate_wind(world_position.xz);
+    let t = min(world_position.y / 0.1, 1.0);
+    let age = pow(min(model.age, 1.0), 2.0);
+    world_position.z += wind * age * t;
     
     var out: VertexOutput;
     out.clip_position = camera.view_proj * world_position;
     out.normal = normalize(normal.xyz);
-    out.color = model.color;
+    out.age = model.age;
     out.world_pos = world_position.xyz;
     
     return out;
 }
 
+fn sample_ground(world_pos: vec3<f32>) -> vec3<f32> {
+    let uv = world_pos * 0.1;
+    let ground = textureSample(tex, tex_sampler, uv.xz).r * 0.01;
+    let lut = textureSample(lut_tex, lut_tex_sampler, vec2<f32>(0.0, 0.5)).rgb;
+    return lut * (1.0 - ground);
+}
+
+fn get_shadow(normal: vec3<f32>) -> f32{
+    let light_dir = vec3<f32>(-1.0);
+
+    let d = max(dot(light_dir, normal), 0.0);
+    return 1.0 - d * 0.05;
+}
 
 @fragment
 fn fs_color_object(in: VertexOutput) -> @location(0) vec4<f32>{
-    let light_dir = vec3<f32>(-1.0);
+    var ground = sample_ground(in.world_pos);    
+    var t = clamp(in.world_pos.y / 0.1, 0.0, 1.0);
 
-    let d = max(dot(light_dir, in.normal), 0.0);
-    let color = in.color * (1.0 - d * 0.1);
+    let lut = textureSample(lut_tex, lut_tex_sampler, vec2<f32>(in.age, 0.5)).rgb;
 
-    return vec4<f32>(in.color , 1.0);
+    var color = lut * t + vec3<f32>(ground * (1.0 - t));
+    color *= get_shadow(in.normal);
+    // return vec4<f32>(vec3<f32>(ground), 1.0);
+    return vec4<f32>(color, 1.0);
 }
 
 @fragment
 fn fs_floor(in: VertexOutput) -> @location(0) vec4<f32>{
-    let uv = in.world_pos * 0.1;
-    let color = textureSample(tex, tex_sampler, uv.xz);
+    // let wind = calculate_wind(in.world_pos.xz);
+    // return vec4<f32>(vec3<f32>(wind), 1.0);
 
-    return vec4<f32>(color.rgb * 0.02, 1.0);
+    return vec4<f32>(sample_ground(in.world_pos), 1.0);
 }
 
 @fragment
 fn fs_grass(in: VertexOutput) -> @location(0) vec4<f32>{
-    let uv = in.world_pos * 0.1;
-    var color = textureSample(tex, tex_sampler, uv.xz).r * 0.02;
+    let ground = sample_ground(in.world_pos);
+    
+    var t = min(in.world_pos.y / 0.1, 1.0);
+    let color = textureSample(lut_tex, lut_tex_sampler, vec2<f32>(t, 0.5)).rgb;
 
-    let t = min(in.world_pos.y / 0.1, 1.0);
-    color += t * t * t * 0.65 * (0.5 + color * 0.5);
-    return vec4<f32>(vec3<f32>(color), 1.0);
+    // return vec4<f32>(vec3<f32>(t), 1.0);
+    return vec4<f32>(color, 1.0);
 }
 
+fn calculate_wind(coords: vec2<f32>) -> f32{
+    let time = render_data.time * render_data.wind_speed;
+
+    let noise = textureSampleLevel(tex, tex_sampler, coords * render_data.wind_noise_scale + time * 0.01, 0.0).r;
+
+    var pos = (coords.x + coords.y) + noise * render_data.wind_noise_strength;
+    return sin(pos * render_data.wind_scale + time) * render_data.wind_strength;
+}
 

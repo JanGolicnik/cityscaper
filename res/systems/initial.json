@@ -1,0 +1,226 @@
+{
+  "rules": {
+    "initial": "A",
+    "rules": {
+      "A": [
+        {
+          "rules": [
+            {
+              "result": "f[RA]",
+              "chance": 0.3
+            },
+            {
+              "result": "f[RA][RA]",
+              "chance": 0.4
+            },
+            {
+              "result": "f[RA][RA][RA]",
+              "chance": 0.3
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "[RA][RA]",
+              "max_gen": 0.5
+            },
+            {
+              "result": "[RfA][RfA]",
+              "min_gen": 0.5
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "f[TA][+(0.0~360.0)^(90.0)B][+(0.0~360.0)^(90.0)B][+(0.0~360.0)^(90.0)B]"
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "f[RA]",
+              "chance": 0.3
+            },
+            {
+              "result": "f[RA][RA]",
+              "chance": 0.4
+            },
+            {
+              "result": "f[RA][RA][RA]",
+              "chance": 0.3
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "f[TA][TTA]",
+              "max_gen": 0.3,
+              "chance": 0.3
+            },
+            {
+              "result": "f[TA]",
+              "max_gen": 0.5
+            },
+            {
+              "result": "f[TA]BBBBBBBBBB",
+              "min_gen": 0.5
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "f[TA][TTA]",
+              "max_gen": 0.3,
+              "chance": 0.3
+            },
+            {
+              "result": "f[TA]",
+              "max_gen": 0.5
+            },
+            {
+              "result": "f[TA]CCCCCCCCCCC",
+              "min_gen": 0.5
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "[^(-45.0~45.0)|(0.9)fA]",
+              "min_gen": 0.1
+            },
+            {
+              "result": "[RfA][RfA]",
+              "min_gen": 0.6
+            },
+            {
+              "result": "[RfA][RfA][RfA][RfA]",
+              "max_gen": 0.1
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "f[RA]E"
+            }
+          ]
+        }
+      ],
+      "B": [
+        {
+          "rules": [
+            {
+              "result": "[+(0.0~360.0)^(70.0~110.0)C]"
+            }
+          ]
+        }
+      ],
+      "C": [
+        {
+          "rules": [
+            {
+              "result": "C",
+              "max_gen": 0.6
+            },
+            {
+              "result": "f[RSC][RSC]",
+              "min_gen": 0.6
+            }
+          ]
+        }
+      ],
+      "D": [
+        {
+          "rules": [
+            {
+              "result": "[+(0.0~360.0)^(70.0~110.0)B]"
+            }
+          ]
+        }
+      ],
+      "E": [
+        {
+          "rules": [
+            {
+              "result": "fRE"
+            }
+          ]
+        }
+      ],
+      "R": [
+        {
+          "rules": [
+            {
+              "result": ">(-50.0~50.0)^(-50.0~50.0)S"
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "+(-45.0~45.0)^(-45.0~45.0)S"
+            }
+          ]
+        },
+        {
+          "rules": [
+            {
+              "result": "+(-45.0~45.0)^(-45.0,45.0)|(0.85)"
+            }
+          ]
+        }
+      ],
+      "T": [
+        {
+          "rules": [
+            {
+              "result": ">(-20.0~20.0)^(-20.0~20.0)S"
+            }
+          ]
+        }
+      ],
+      "S": [
+        {
+          "rules": [
+            {
+              "result": "|(0.75)",
+              "chance": 0.2
+            },
+            {
+              "result": "|(0.8)",
+              "chance": 0.3
+            },
+            {
+              "result": "|(0.9)",
+              "chance": 0.5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "rendering": {
+    "default_angle_change": 15.0,
+    "shapes": {
+      "f": {
+        "Branch": {
+          "width": 6,
+          "length": 0.2,
+          "angle": 20.0
+        }
+      },
+      "s": {
+        "Circle": {
+          "size": 0.06,
+          "color": [1.0, 0.08, 0.1]
+        }
+      }
+    }
+  }
+}

@@ -185,6 +185,7 @@ pub fn create_lut_textures(
     let data = read_lut(false)
         .unwrap_or_default()
         .iter()
+        .take(renderer.max_texture_size().x as usize)
         .flat_map(|e| {
             [
                 (e.x * 255.0) as u8,
@@ -222,6 +223,7 @@ pub fn create_lut_textures(
     let data = read_lut(true)
         .unwrap_or_default()
         .iter()
+        .take(renderer.max_texture_size().x as usize)
         .flat_map(|e| {
             [
                 (e.x * 255.0) as u8,

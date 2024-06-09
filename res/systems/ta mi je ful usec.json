@@ -1,0 +1,94 @@
+{
+  "rules": {
+    "initial": "A",
+    "rules": {
+      "A": [
+        {
+          "rules": [
+            {
+              "result": "f[RA][RRA]",
+              "max_gen": 0.3,
+              "chance": 0.3
+            },
+            {
+              "result": "f[RA]",
+              "max_gen": 0.5
+            },
+            {
+              "result": "f[RA]CCCCCCCCCC",
+              "min_gen": 0.5
+            }
+          ]
+        }
+      ],
+      "B": [
+        {
+          "rules": [
+            {
+              "result": "B",
+              "max_gen": 0.6
+            },
+            {
+              "result": "f[RSB][RSB]",
+              "min_gen": 0.6
+            }
+          ]
+        }
+      ],
+      "C": [
+        {
+          "rules": [
+            {
+              "result": "[+(0.0~360.0)^(70.0~110.0)B]"
+            }
+          ]
+        }
+      ],
+      "R": [
+        {
+          "rules": [
+            {
+              "result": ">(-20.0~20.0)^(-20.0~20.0)S"
+            }
+          ]
+        }
+      ],
+      "S": [
+        {
+          "rules": [
+            {
+              "result": "|(0.75)",
+              "chance": 0.2
+            },
+            {
+              "result": "|(0.8)",
+              "chance": 0.3
+            },
+            {
+              "result": "|(0.9)",
+              "chance": 0.5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "rendering": {
+    "default_angle_change": 15.0,
+    "shapes": {
+      "f": {
+        "Branch": {
+          "width": 6,
+          "length": 0.2,
+          "angle": 20.0
+        }
+      },
+      "s": {
+        "Circle": {
+          "size": 0.06,
+          "color": [1.0, 0.08, 0.1]
+        }
+      }
+    }
+  }
+}

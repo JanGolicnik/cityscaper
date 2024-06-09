@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use jandering_engine::types::{Qua, Vec3};
-use rand::{rngs::ThreadRng, Rng};
+use rand::rngs::ThreadRng;
 use serde::Deserialize;
 
-use self::config::{LConfig, LRule, LSymbol, Value};
+use self::config::{LConfig, LSymbol};
 
 pub mod colors;
 pub mod config;
@@ -16,7 +16,7 @@ enum Shape {
     Circle { size: f32 },
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 pub struct RenderConfig {
     default_angle_change: f32,
     shapes: HashMap<char, Shape>,
@@ -29,6 +29,7 @@ pub enum RenderShape {
         end: Vec3,
         width: f32,
         age: f32,
+        last_age: f32,
     },
     Circle {
         size: f32,
@@ -37,11 +38,30 @@ pub enum RenderShape {
     },
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct State {
     rotation: Qua,
     position: Vec3,
     scale: f32,
+    age: f32,
+}
+
+impl State {
+    fn clone(&self, age: f32) -> Self {
+        let Self {
+            rotation,
+            position,
+            scale,
+            ..
+        } = *self;
+
+        Self {
+            rotation,
+            position,
+            scale,
+            age,
+        }
+    }
 }
 
 pub fn build(config: &LConfig, rng: &mut ThreadRng) -> Vec<RenderShape> {
@@ -50,7 +70,6 @@ pub fn build(config: &LConfig, rng: &mut ThreadRng) -> Vec<RenderShape> {
         ..Default::default()
     }];
 
-    log::info!("built with iterations: {}", config.rules.iterations);
     let mut shapes = Vec::new();
 
     build_symbols(
@@ -87,7 +106,7 @@ fn build_symbols(
 
     for symbol in symbols {
         match symbol {
-            LSymbol::Scope => states.push(states.last().unwrap().clone()),
+            LSymbol::Scope => states.push(states.last().unwrap().clone(age)),
             LSymbol::ScopeEnd => {
                 if states.len() > 1 {
                     states.pop();
@@ -102,37 +121,26 @@ fn build_symbols(
                     shapes.push(shape)
                 }
             }
-            LSymbol::RotateX(value)
-            | LSymbol::RotateNegX(value)
-            | LSymbol::RotateY(value)
-            | LSymbol::RotateNegY(value)
-            | LSymbol::RotateZ(value)
-            | LSymbol::RotateNegZ(value) => {
-                let angle_change = match value {
-                    Value::Range { min, max } => rng.gen_range(*min..*max),
-                    Value::Exact(value) => *value,
-                    Value::Default => config.rendering.default_angle_change,
-                };
+            LSymbol::RotateX(values)
+            | LSymbol::RotateNegX(values)
+            | LSymbol::RotateY(values)
+            | LSymbol::RotateNegY(values)
+            | LSymbol::RotateZ(values)
+            | LSymbol::RotateNegZ(values) => {
+                let angle = values.get(config.rendering.default_angle_change, rng);
                 states.last_mut().unwrap().rotation *=
-                    Qua::from_axis_angle(symbol_to_axis(symbol), angle_change.to_radians());
+                    Qua::from_axis_angle(symbol_to_axis(symbol), angle.to_radians());
             }
-            LSymbol::Scale(value) => {
-                let scale = match value {
-                    Value::Range { min, max } => rng.gen_range(*min..*max),
-                    Value::Exact(value) => *value,
-                    Value::Default => continue,
-                };
-                states.last_mut().unwrap().scale *= scale;
+            LSymbol::Scale(values) => {
+                states.last_mut().unwrap().scale *= values.get(1.0, rng);
             }
             LSymbol::Rule(id) => {
-                if iteration >= config.rules.iterations {
+                if age > 1.0 {
                     continue;
                 }
 
-                if let Some(rules) = config.rules.rules.get(id) {
-                    if let Some(rule) = pick_rule(rules, rng, iteration) {
-                        build_symbols(states, shapes, rule, config, rng, iteration + 1);
-                    }
+                if let Some(rule) = config.get_rule(id, rng, age) {
+                    build_symbols(states, shapes, rule, config, rng, iteration + 1);
                 }
             }
         }
@@ -159,6 +167,7 @@ fn get_shape(
                     end,
                     width: *width,
                     age,
+                    last_age: state.age,
                 }
             }
             Shape::Circle { size } => RenderShape::Circle {
@@ -178,6 +187,7 @@ fn get_shape(
                     end,
                     width: *width,
                     age,
+                    last_age: state.age,
                 }
             }
         };
@@ -185,26 +195,4 @@ fn get_shape(
     } else {
         None
     }
-}
-
-fn pick_rule<'rules>(
-    rules: &'rules [LRule],
-    rng: &mut ThreadRng,
-    gen: u32,
-) -> Option<&'rules Vec<LSymbol>> {
-    let n = rng.gen::<f32>();
-    let mut t = 0.0;
-    for rule in rules.iter() {
-        if rule.min_gen.is_some_and(|v| gen < v) {
-            continue;
-        }
-        if rule.max_gen.is_some_and(|v| gen > v) {
-            continue;
-        }
-        t += rule.chance;
-        if t > n {
-            return Some(&rule.result);
-        }
-    }
-    None
 }

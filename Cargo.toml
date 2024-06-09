@@ -26,6 +26,7 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "HtmlTextAreaElement",
     "HtmlDivElement",
+    "HtmlSelectElement",
     "HtmlCollection",
     "Document",
     "Screen",

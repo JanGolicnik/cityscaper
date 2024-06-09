@@ -20,8 +20,12 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
     <script src="https://code.jquery.com/jquery-3.7.1.js"></script>
-    <script src="https://code.jquery.com/ui/1.13.3/jquery-ui.js"></script>
+    <script
+			  src="https://code.jquery.com/ui/1.13.3/jquery-ui.js"
+			  integrity="sha256-J8ay84czFazJ9wcTuSDLpPmwpMXOm573OUtZHPQqpEU="
+			  crossorigin="anonymous"></script>
     <style>
       :root{
         --font-color: white;
@@ -107,8 +111,19 @@
         'GRAD' 0,
         'opsz' 24
       }
-      .hidden{
-        display:none;
+      .on-top{
+        position: absolute;
+      }
+      .text-container {
+        height: 100%;
+        width: 100%;
+        word-wrap: unset;
+        border: unset;
+        padding: 1em;
+      }
+      #wrapper{
+        margin-top: 0.333rem;
+        height: 100%;
       }
       #settings{
         display: flex;
@@ -116,15 +131,15 @@
         align-items: start;
         transition-delay: 0.2s;
         transition: transform 1s;
+        height: 100%;
       }
-      #settings.hidden{
-        transform: translate(-120%, 0);
+      #settings > *{
+        flex: 0 1 auto;
       }
-      .on-top{
-        position: absolute;
-      }
-      #wrapper{
-        margin-top: 0.333rem;
+      #edit-text{
+        width: 55vw;
+        height: auto;
+        flex: 1 1 auto;
       }
       #buttons{
         display: flex;
@@ -135,6 +150,18 @@
       .grabbable{
         cursor:grab;
         width: .7rem;
+      }
+      #error-box{
+        background-color: rgb(255, 61, 61);
+        width: 100%;
+        height: 6em;
+        padding: 0 1em 0 1em ;
+      }
+      .hidden{
+        display:none;
+      }
+      #settings.hidden{
+        transform: translate(-120%, 0);
       }
       *{
         font-family: "Roboto Mono", monospace;
@@ -156,7 +183,7 @@
       </button>
       
       <div id="settings">
-        <div >
+        <div>
           detail:
           <input  id="detail" type="number" value="10"></input>
         </div>
@@ -177,7 +204,6 @@
             <input class="color-stop-age" type="number" value="12"></input>
           </div>
         </div>
-
         <div id="buttons">
           <button class="button" id="add-button">
             <span class="material-symbols-outlined">add</span>
@@ -186,6 +212,24 @@
             <span class="material-symbols-outlined">remove</span>
           </button>
         </div>
+        <button class="button" id="toggle-edit">
+          <span class="material-symbols-outlined">edit</span>
+        </button>
+        <div id="edit-text" class="hidden">
+          <div>
+            <label for="presets">Choose a preset:</label>
+            <select name="presets" id="presets"></select>
+          </div>
+          <textarea id="edit-text-input"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            class="text-container"
+          ></textarea>
+        </div>
+          <div id="error-box">
+            heyy
+          </div>
       </div>
     </div>
 
@@ -206,15 +250,26 @@
   <script>
     var gradient_creator = document.getElementById("gradient-creator");
 
-    document.getElementById("add-button").addEventListener("mouseup", (event) => {add_stop()});
-    document.getElementById("remove-button").addEventListener("mouseup", (event) => {remove_stop()});
-    document.getElementById("toggle-menu").addEventListener("mouseup", (event) => {toggle_menu()});
+    $("#add-button").on("mouseup", (event) => {add_stop()});
+    $("#remove-button").on("mouseup", (event) => {remove_stop()});
+    $("#toggle-menu").on("mouseup", (event) => {$( "#settings" ).toggleClass("hidden")});
     $('#gradient-creator > .color-stop > .color-picker').each(() => {
       $(this).on('input', function (event){event.preventDefault(); handle_color_change();})
     });
+    $('#presets').on('input', function (event){event.preventDefault(); $('#presets').attr('changed', 'true');});
+    $('#edit-text-input').on('input', function (event){event.preventDefault(); $('#edit-text-input').attr('changed', 'true');});
+    $('#toggle-edit').on('mouseup', function (event){event.preventDefault(); toggle_edit();});
 
-    function toggle_menu(){
-      $( "#settings" ).toggleClass("hidden");
+    $('#settings').mousedown(function(event){event.stopPropagation()});
+
+    function toggle_edit(){
+      let edit_text = $('#edit-text');
+      edit_text.toggleClass('hidden');
+      if (edit_text.hasClass('hidden')){
+        $('#error-box').addClass('hidden');
+      }else{
+        $('#error-box').removeClass('hidden');
+      }
     }
 
     function handle_color_change() {

@@ -30,8 +30,9 @@ use crate::{
     render_data::RenderDataBindGroup,
 };
 
-use self::setup::{
-    create_camera, create_lut_textures, create_objects, create_shaders, create_textures,
+use self::{
+    logic::setups_js_inputs,
+    setup::{create_camera, create_lut_textures, create_objects, create_shaders, create_textures},
 };
 
 pub mod logic;
@@ -56,6 +57,7 @@ pub struct Application {
 
     plants: Plants,
     l_config: LConfig,
+    presets: HashMap<String, String>,
     floor: Object<Instance>,
 
     dust: AgeObject,
@@ -71,6 +73,8 @@ pub struct Application {
     render_data: BindGroupHandle<RenderDataBindGroup>,
 
     rng: ThreadRng,
+
+    randomize_rule_sets_timer: f32,
 }
 
 const N_DUST: u32 = 60;
@@ -81,6 +85,8 @@ const ORTHO_WIDTH: f32 = 2.0;
 const ORTHO_HEIGHT: f32 = ORTHO_WIDTH;
 const ORTHO_NEAR: f32 = 0.003;
 const ORTHO_FAR: f32 = 1000.0;
+
+const RANDOMIZE_RULE_SETS_TIME_SECS: f32 = 10.0;
 
 impl Application {
     pub async fn new(engine: &mut Engine) -> Self {
@@ -98,10 +104,9 @@ impl Application {
 
         let (plants, floor, dust, grass) = create_objects(engine.renderer.as_mut());
 
-        let json = load_text(jandering_engine::utils::FilePath::FileName("lsystem.json"))
-            .await
-            .unwrap();
-        let l_config = LConfig::from_json(json);
+        let l_config = LConfig::default();
+
+        let presets = setups_js_inputs().await.unwrap_or(HashMap::new());
 
         let render_data = RenderDataBindGroup::new(engine.renderer.as_mut());
         let render_data = create_typed_bind_group(engine.renderer.as_mut(), render_data);
@@ -123,6 +128,7 @@ impl Application {
 
             plants,
             l_config,
+            presets,
             floor,
 
             dust,
@@ -138,6 +144,8 @@ impl Application {
             render_data,
 
             rng,
+
+            randomize_rule_sets_timer: RANDOMIZE_RULE_SETS_TIME_SECS,
         }
     }
 }
@@ -242,6 +250,14 @@ impl EventHandler for Application {
         let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
         camera.update(context.events, dt);
 
+        self.randomize_rule_sets_timer -= dt;
+        if self.randomize_rule_sets_timer < 0.0 {
+            self.l_config.randomize_rule_sets(Some(1), &mut self.rng);
+            self.randomize_rule_sets_timer = RANDOMIZE_RULE_SETS_TIME_SECS;
+            log::info!("randomized rule sets");
+        }
+
+        self.update_config();
         self.spawn_new_plants(context.renderer.as_mut());
         self.update_dust(dt, context.renderer.as_mut());
         self.update_grass(context.renderer.as_mut());

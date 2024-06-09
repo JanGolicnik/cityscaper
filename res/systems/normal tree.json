@@ -1,0 +1,70 @@
+{
+  "rules": {
+    "initial": "A",
+    "rules": {
+      "A": [
+        {
+          "rules": [
+            {
+              "result": "f[RA]",
+              "chance": 0.3
+            },
+            {
+              "result": "f[RA][RA]",
+              "chance": 0.4
+            },
+            {
+              "result": "f[RA][RA][RA]",
+              "chance": 0.3
+            }
+          ]
+        }
+      ],
+      "R": [
+        {
+          "rules": [
+            {
+              "result": ">(-20.0~20.0)^(-20.0~20.0)S"
+            }
+          ]
+        }
+      ],
+      "S": [
+        {
+          "rules": [
+            {
+              "result": "|(0.75)",
+              "chance": 0.2
+            },
+            {
+              "result": "|(0.8)",
+              "chance": 0.3
+            },
+            {
+              "result": "|(0.9)",
+              "chance": 0.5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "rendering": {
+    "default_angle_change": 15.0,
+    "shapes": {
+      "f": {
+        "Branch": {
+          "width": 6,
+          "length": 0.2,
+          "angle": 20.0
+        }
+      },
+      "s": {
+        "Circle": {
+          "size": 0.06,
+          "color": [1.0, 0.08, 0.1]
+        }
+      }
+    }
+  }
+}

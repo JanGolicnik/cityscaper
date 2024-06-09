@@ -1,20 +1,22 @@
+use std::collections::HashMap;
+
 use jandering_engine::{
     core::{
         object::Instance,
         renderer::{get_typed_bind_group, Renderer},
     },
     types::{Mat4, Qua, Vec2, Vec3},
+    utils::load_text,
 };
 use rand::{rngs::ThreadRng, Rng};
 use wasm_bindgen::JsCast;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlDivElement, HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 
 use crate::{
     color_obj::{AgeObject, AgeVertex},
     icosphere,
     image::Image,
-    l_system::{self, RenderShape},
-    timer::Timer,
+    l_system::{self, config::LConfig, RenderShape},
 };
 
 use super::{cylinder, Application};
@@ -57,6 +59,20 @@ fn cylinder(age: f32, next_age: f32, mat: Mat4, index_offset: u32) -> (Vec<AgeVe
 }
 
 impl Application {
+    pub fn update_config(&mut self) {
+        if let Some(config) = self.read_lsystem() {
+            match LConfig::from_json(config) {
+                Ok(l_config) => {
+                    self.l_config = l_config;
+                    self.plants.clear();
+                    self.display_error("");
+                }
+                Err(error) => {
+                    self.display_error(&error);
+                }
+            }
+        }
+    }
     pub fn spawn_new_plants(&mut self, renderer: &mut dyn Renderer) {
         let camera = get_typed_bind_group(renderer, self.camera).unwrap();
         if let Some(ground_pos) = camera_ground_intersection(camera.direction(), camera.position())
@@ -99,26 +115,25 @@ impl Application {
     }
 
     pub fn new_plant(&mut self, rng: &mut ThreadRng) -> (Vec<AgeVertex>, Vec<u32>) {
-        let timer = Timer::now("building took: ".to_string());
-
+        // let timer = Timer::now("building took: ".to_string());
+        self.l_config.randomize_rule_sets(None, rng);
         let shapes = l_system::build(&self.l_config, rng);
 
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        timer.print();
+        // timer.print();
 
-        let timer = Timer::now("meshing took: ".to_string());
+        // let timer = Timer::now("meshing took: ".to_string());
 
-        let age_change = 1.0 / self.l_config.rules.iterations as f32;
         for shape in shapes {
             let (mut new_vertices, mut new_indices) =
-                shape_to_mesh_data(shape, vertices.len() as u32, age_change);
+                shape_to_mesh_data(shape, vertices.len() as u32);
             vertices.append(&mut new_vertices);
             indices.append(&mut new_indices);
         }
 
-        timer.print();
+        // timer.print();
 
         (vertices, indices)
     }
@@ -243,6 +258,45 @@ impl Application {
             }
         }
     }
+
+    fn read_lsystem(&self) -> Option<String> {
+        let window = web_sys::window()?;
+        let document = window.document()?;
+        let presets_input = document
+            .get_element_by_id("presets")?
+            .dyn_into::<HtmlSelectElement>()
+            .ok()?;
+        let presets_edit = document
+            .get_element_by_id("edit-text-input")?
+            .dyn_into::<HtmlTextAreaElement>()
+            .ok()?;
+
+        if presets_input.has_attribute("changed") {
+            if let Some(preset_text) = self.presets.get(&presets_input.value()) {
+                presets_edit.set_value(preset_text);
+                let _ = presets_edit.set_attribute("changed", "");
+            }
+            let _ = presets_input.remove_attribute("changed");
+        }
+
+        if presets_edit.has_attribute("changed") {
+            let _ = presets_edit.remove_attribute("changed");
+            Some(presets_edit.value())
+        } else {
+            None
+        }
+    }
+
+    fn display_error(&self, string: &str) -> Option<()> {
+        let window = web_sys::window()?;
+        let document = window.document()?;
+        let error_box = document
+            .get_element_by_id("error-box")?
+            .dyn_into::<HtmlDivElement>()
+            .ok()?;
+        error_box.set_inner_text(string);
+        Some(())
+    }
 }
 
 pub fn read_lut(linear: bool) -> Option<Vec<Vec3>> {
@@ -291,17 +345,14 @@ fn camera_ground_intersection(dir: Vec3, cam_pos: Vec3) -> Option<Vec3> {
     }
 }
 
-fn shape_to_mesh_data(
-    shape: RenderShape,
-    vertices_len: u32,
-    age_change: f32,
-) -> (Vec<AgeVertex>, Vec<u32>) {
+fn shape_to_mesh_data(shape: RenderShape, vertices_len: u32) -> (Vec<AgeVertex>, Vec<u32>) {
     let (vertices, indices) = match shape {
         RenderShape::Line {
             start,
             end,
             width,
             age,
+            last_age,
         } => {
             let diff = end - start;
             let length = diff.length();
@@ -311,7 +362,7 @@ fn shape_to_mesh_data(
                 Qua::from_rotation_arc(Vec3::Y, diff.normalize()),
                 start + diff * 0.5,
             );
-            let (vertices, indices) = cylinder(age, age + age_change, mat, vertices_len);
+            let (vertices, indices) = cylinder(last_age, age, mat, vertices_len);
             (vertices, indices)
         }
         RenderShape::Circle { size, pos, age } => {
@@ -321,4 +372,39 @@ fn shape_to_mesh_data(
         }
     };
     (vertices, indices)
+}
+
+pub async fn setups_js_inputs() -> Option<HashMap<String, String>> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let presets_input = document
+        .get_element_by_id("presets")?
+        .dyn_into::<HtmlSelectElement>()
+        .ok()?;
+
+    let presets = load_text(jandering_engine::utils::FilePath::FileName("presets.json"))
+        .await
+        .unwrap();
+    let presets: Vec<String> = serde_json::from_str(&presets).unwrap();
+    if presets.is_empty() {
+        return None;
+    }
+
+    let mut map = HashMap::new();
+
+    presets_input.set_value(&presets[0]);
+    let _ = presets_input.set_attribute("changed", "");
+    for preset in presets {
+        let el = document.create_element("option").ok()?;
+        el.set_inner_html(&preset);
+        let _ = presets_input.append_child(&el);
+
+        let text = load_text(jandering_engine::utils::FilePath::FileName(&format!(
+            "systems/{preset}.json"
+        )))
+        .await
+        .unwrap();
+        map.insert(preset, text);
+    }
+    Some(map)
 }

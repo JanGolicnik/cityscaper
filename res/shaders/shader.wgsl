@@ -140,7 +140,6 @@ fn fs_dust(in: VertexOutput) -> @location(0) vec4<f32>{
 fn fs_floor(in: VertexOutput) -> @location(0) vec4<f32>{
     // let wind = calculate_wind(in.world_pos.xz);
     // return vec4<f32>(vec3<f32>(wind), 1.0);
-
     return vec4<f32>(sample_ground(in.world_pos), 1.0);
 }
 

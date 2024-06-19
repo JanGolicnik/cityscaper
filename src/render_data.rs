@@ -1,6 +1,6 @@
-use jandering_engine::core::{
+use jandering_engine::{
     bind_group::{BindGroup, BindGroupLayout, BindGroupLayoutEntry},
-    renderer::{BufferHandle, Renderer},
+    renderer::{BufferHandle, Janderer, Renderer},
 };
 
 #[repr(C)]
@@ -28,7 +28,7 @@ impl BindGroup for RenderDataBindGroup {
         bytemuck::cast_slice(&[self.data]).into()
     }
 
-    fn get_layout(&self, _renderer: &mut dyn Renderer) -> BindGroupLayout {
+    fn get_layout(&self, _renderer: &mut Renderer) -> BindGroupLayout {
         BindGroupLayout {
             entries: vec![BindGroupLayoutEntry::Data(self.buffer_handle)],
         }
@@ -36,7 +36,7 @@ impl BindGroup for RenderDataBindGroup {
 }
 
 impl RenderDataBindGroup {
-    pub fn new(renderer: &mut dyn Renderer) -> Self {
+    pub fn new(renderer: &mut Renderer) -> Self {
         let data = RenderDataData {
             time: 0.0,
             wind_strength: 0.21,

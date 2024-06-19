@@ -1,23 +1,17 @@
-use std::collections::HashMap;
-
 use image::GenericImageView;
 use jandering_engine::{
-    core::{
-        bind_group::{
-            camera::free::{CameraController, MatrixCameraBindGroup},
-            texture::TextureBindGroup,
-        },
-        object::{Instance, Object, Vertex},
-        renderer::{
-            create_typed_bind_group, create_typed_bind_group_at, get_typed_bind_group,
-            BindGroupHandle, Renderer, SamplerHandle, ShaderHandle, TextureHandle,
-        },
-        shader::ShaderDescriptor,
-        texture::{sampler::SamplerDescriptor, TextureDescriptor, TextureFormat},
+    bind_group::{
+        camera::free::{CameraController, MatrixCameraBindGroup},
+        texture::TextureBindGroup,
     },
-    types::{UVec2, Vec2, Vec3},
+    object::{Instance, Object, Vertex},
+    renderer::{BindGroupHandle, Janderer, Renderer, SamplerHandle, ShaderHandle, TextureHandle},
+    shader::ShaderDescriptor,
+    texture::{sampler::SamplerDescriptor, TextureDescriptor, TextureFormat},
+    types::{Mat4, Qua, UVec2, Vec2, Vec3},
     utils::load_text,
 };
+use rand::{rngs::ThreadRng, Rng};
 
 use crate::{
     camera_controller::IsometricCameraController,
@@ -26,11 +20,19 @@ use crate::{
 };
 
 use super::{
-    logic::read_lut, Plants, RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT,
-    ORTHO_NEAR, ORTHO_WIDTH, REFERENCE_DIAGONAL,
+    logic::{parse_lut, place_pos_on_heightmap},
+    ApplicationBuilder, RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT, ORTHO_NEAR,
+    ORTHO_WIDTH, REFERENCE_DIAGONAL,
 };
+const GRASS_RANGE: f32 = 2.75;
+const GRASS_ITERATIONS: u32 = 12;
+const GRASS_HEIGHT: f32 = 0.1;
+const GRASS_WIDTH: f32 = 0.0075;
 
-pub fn create_camera(renderer: &mut dyn Renderer) -> BindGroupHandle<MatrixCameraBindGroup> {
+pub fn create_camera(
+    renderer: &mut Renderer,
+    rng: &mut ThreadRng,
+) -> BindGroupHandle<MatrixCameraBindGroup> {
     let (aspect, diagonal) = {
         let size = renderer.size();
         let size = Vec2::new(size.x as f32, size.y as f32);
@@ -52,12 +54,37 @@ pub fn create_camera(renderer: &mut dyn Renderer) -> BindGroupHandle<MatrixCamer
     );
     *camera.position_mut() = Vec3::new(-9.5, 10.0, -9.5);
     *camera.direction_mut() = Vec3::new(1.0, -1.0, 1.0).normalize();
-    create_typed_bind_group(renderer, camera)
+    renderer.create_typed_bind_group(camera)
+}
+pub fn create_grass(rng: &mut ThreadRng, noise_image: &Image) -> Vec<Instance> {
+    (0..N_GRASS)
+        .map(|_| {
+            let dist = rng.gen::<f32>();
+            let angle = rng.gen_range(0.0f32..360.0f32);
+
+            let pos_2d = Vec2::from_angle(angle.to_radians()) * dist * GRASS_RANGE;
+            let mut pos = Vec3::new(pos_2d.x, 0.0, pos_2d.y);
+
+            pos = place_pos_on_heightmap(pos, GRASS_ITERATIONS, noise_image, rng);
+
+            let scale_mod = 0.7 + noise_image.sample(pos.x, pos.y) * 0.6;
+            let mut scale = Vec3::new(GRASS_WIDTH, GRASS_HEIGHT, 1.0) * scale_mod;
+            scale *= 1.0 - (pos.length() / GRASS_RANGE) * 0.5;
+
+            let mat = Mat4::from_scale_rotation_translation(scale, Qua::default(), pos);
+            Instance {
+                model: mat,
+                inv_model: mat.inverse(),
+            }
+        })
+        .collect()
 }
 
 pub fn create_objects(
-    renderer: &mut dyn Renderer,
-) -> (Plants, Object<Instance>, AgeObject, AgeObject) {
+    renderer: &mut Renderer,
+    rng: &mut ThreadRng,
+    noise_image: &Image,
+) -> (Object<Instance>, AgeObject, AgeObject) {
     let floor = Object::quad(
         renderer,
         vec![Instance::default()
@@ -65,38 +92,27 @@ pub fn create_objects(
             .set_size(Vec3::splat(100.0))],
     );
 
-    let mut plants = HashMap::new();
-    plants.reserve(50);
-
     let dust_instances = (0..N_DUST)
         .map(|_| Instance::default().translate(Vec3::splat(-1000.0)))
         .collect();
     let dust = AgeObject::quad(renderer, 0.3, dust_instances);
 
-    let grass_instances = (0..N_GRASS)
-        .map(|_| {
-            Instance::default()
-                .set_size(Vec3::new(0.008, 0.1, 1.0))
-                .set_position(Vec3::new(1000.0, 0.0, 0.0))
-        })
-        .collect::<Vec<_>>();
+    let grass_instances = create_grass(rng, noise_image);
     let grass = AgeObject::quad(renderer, 1.0, grass_instances);
 
-    (plants, floor, dust, grass)
+    (floor, dust, grass)
 }
 
-pub async fn create_textures(
-    renderer: &mut dyn Renderer,
+pub fn create_textures(
+    renderer: &mut Renderer,
 ) -> (
     TextureHandle,
     Image,
     BindGroupHandle<TextureBindGroup>,
-    SamplerHandle,
     BindGroupHandle<TextureBindGroup>,
     BindGroupHandle<TextureBindGroup>,
 ) {
-    let (lut_texture, lut_texture_linear, lut_sampler) =
-        create_lut_textures(renderer, None, None, None);
+    let (lut_texture, lut_texture_linear) = create_lut_textures(renderer, None, None, None);
     let depth_texture = renderer.create_texture(TextureDescriptor {
         size: renderer.size(),
         format: TextureFormat::Depth32F,
@@ -105,7 +121,7 @@ pub async fn create_textures(
     let noise_image = image::load_from_memory(include_bytes!("../../res/noise.png")).unwrap();
     let noise_texture = {
         let tex_sampler = renderer.create_sampler(SamplerDescriptor {
-            address_mode: jandering_engine::core::texture::sampler::SamplerAddressMode::Repeat,
+            address_mode: jandering_engine::texture::sampler::SamplerAddressMode::Repeat,
             ..Default::default()
         });
         let noise_handle = renderer.create_texture(TextureDescriptor {
@@ -115,7 +131,7 @@ pub async fn create_textures(
             ..Default::default()
         });
         let noise_texture = TextureBindGroup::new(renderer, noise_handle, tex_sampler);
-        create_typed_bind_group(renderer, noise_texture)
+        renderer.create_typed_bind_group(noise_texture)
     };
     let noise_image = Image::new(noise_image.to_rgb32f(), 0.1);
 
@@ -123,22 +139,18 @@ pub async fn create_textures(
         depth_texture,
         noise_image,
         noise_texture,
-        lut_sampler,
         lut_texture,
         lut_texture_linear,
     )
 }
 
-pub async fn create_shaders(
-    renderer: &mut dyn Renderer,
+pub fn create_shaders(
+    renderer: &mut Renderer,
+    builder: &ApplicationBuilder,
 ) -> (ShaderHandle, ShaderHandle, ShaderHandle, ShaderHandle) {
     let descriptor = ShaderDescriptor::default()
-        .with_source(jandering_engine::core::shader::ShaderSource::Code(
-            load_text(jandering_engine::utils::FilePath::FileName(
-                "shaders/shader.wgsl",
-            ))
-            .await
-            .unwrap(),
+        .with_source(jandering_engine::shader::ShaderSource::Code(
+            builder.shader_source.clone(),
         ))
         .with_descriptors(vec![AgeVertex::desc(), Instance::desc()])
         .with_depth(true)
@@ -166,23 +178,27 @@ pub async fn create_shaders(
 }
 
 pub fn create_lut_textures(
-    renderer: &mut dyn Renderer,
+    renderer: &mut Renderer,
     lut_handle: Option<BindGroupHandle<TextureBindGroup>>,
     lut_handle_linear: Option<BindGroupHandle<TextureBindGroup>>,
     mut lut_sampler: Option<SamplerHandle>,
 ) -> (
     BindGroupHandle<TextureBindGroup>,
     BindGroupHandle<TextureBindGroup>,
-    SamplerHandle,
 ) {
     if lut_sampler.is_none() {
         lut_sampler = Some(renderer.create_sampler(SamplerDescriptor {
-            address_mode: jandering_engine::core::texture::sampler::SamplerAddressMode::Clamp,
+            address_mode: jandering_engine::texture::sampler::SamplerAddressMode::Clamp,
             ..Default::default()
         }));
     }
 
-    let data = read_lut(false)
+    let lut_json = pollster::block_on(load_text(jandering_engine::utils::FilePath::FileName(
+        "lut.json",
+    )))
+    .unwrap();
+
+    let data = parse_lut(&lut_json, false)
         .unwrap_or_default()
         .iter()
         .take(renderer.max_texture_size().x as usize)
@@ -206,21 +222,22 @@ pub fn create_lut_textures(
     };
 
     let lut_texture = if let Some(handle) = lut_handle {
-        let texture_handle = get_typed_bind_group(renderer, handle)
+        let texture_handle = renderer
+            .get_typed_bind_group(handle)
             .unwrap()
             .texture_handle;
         renderer.re_create_texture(desc.clone(), texture_handle);
         let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler.unwrap());
 
-        create_typed_bind_group_at(renderer, texture, handle);
+        renderer.create_typed_bind_group_at(texture, handle);
         handle
     } else {
         let handle = renderer.create_texture(desc.clone());
         let texture = TextureBindGroup::new(renderer, handle, lut_sampler.unwrap());
-        create_typed_bind_group(renderer, texture)
+        renderer.create_typed_bind_group(texture)
     };
 
-    let data = read_lut(true)
+    let data = parse_lut(&lut_json, true)
         .unwrap_or_default()
         .iter()
         .take(renderer.max_texture_size().x as usize)
@@ -238,19 +255,20 @@ pub fn create_lut_textures(
     desc.size.x = (data.len() as u32 / 4).max(1);
 
     let lut_texture_linear = if let Some(handle) = lut_handle_linear {
-        let texture_handle = get_typed_bind_group(renderer, handle)
+        let texture_handle = renderer
+            .get_typed_bind_group(handle)
             .unwrap()
             .texture_handle;
         renderer.re_create_texture(desc, texture_handle);
         let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler.unwrap());
 
-        create_typed_bind_group_at(renderer, texture, handle);
+        renderer.create_typed_bind_group_at(texture, handle);
         handle
     } else {
         let handle = renderer.create_texture(desc);
         let texture = TextureBindGroup::new(renderer, handle, lut_sampler.unwrap());
-        create_typed_bind_group(renderer, texture)
+        renderer.create_typed_bind_group(texture)
     };
 
-    (lut_texture, lut_texture_linear, lut_sampler.unwrap())
+    (lut_texture, lut_texture_linear)
 }

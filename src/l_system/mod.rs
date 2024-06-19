@@ -36,6 +36,8 @@ pub enum RenderShape {
         pos: Vec3,
         age: f32,
     },
+    Scope,
+    ScopeEnd,
 }
 
 #[derive(Default)]
@@ -106,8 +108,12 @@ fn build_symbols(
 
     for symbol in symbols {
         match symbol {
-            LSymbol::Scope => states.push(states.last().unwrap().clone(age)),
+            LSymbol::Scope => {
+                shapes.push(RenderShape::Scope);
+                states.push(states.last().unwrap().clone(age));
+            }
             LSymbol::ScopeEnd => {
+                shapes.push(RenderShape::ScopeEnd);
                 if states.len() > 1 {
                     states.pop();
                 } else {

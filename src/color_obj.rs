@@ -1,11 +1,7 @@
 use jandering_engine::{
-    core::{
-        object::{primitives::quad_data, Instance, ObjectRenderData, Renderable, Vertex},
-        renderer::{BufferHandle, Renderer},
-        shader::{
-            BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode,
-        },
-    },
+    object::{primitives::quad_data, Instance, ObjectRenderData, Renderable, Vertex},
+    renderer::{BufferHandle, Janderer, Renderer},
+    shader::{BufferLayout, BufferLayoutEntry, BufferLayoutEntryDataType, BufferLayoutStepMode},
     types::Vec3,
 };
 
@@ -55,7 +51,7 @@ pub struct AgeObject {
 
 impl AgeObject {
     pub fn new(
-        renderer: &mut dyn Renderer,
+        renderer: &mut Renderer,
         vertices: Vec<AgeVertex>,
         indices: Vec<u32>,
         instances: Vec<Instance>,
@@ -82,7 +78,7 @@ impl AgeObject {
         }
     }
     #[allow(dead_code)]
-    pub fn update(&mut self, renderer: &mut dyn Renderer) {
+    pub fn update(&mut self, renderer: &mut Renderer) {
         if self.previous_instances_len != self.instances.len() {
             self.render_data.instance_buffer =
                 renderer.create_vertex_buffer(bytemuck::cast_slice(&self.instances));
@@ -95,7 +91,7 @@ impl AgeObject {
         }
     }
 
-    pub fn quad(renderer: &mut dyn Renderer, age: f32, instances: Vec<Instance>) -> Self {
+    pub fn quad(renderer: &mut Renderer, age: f32, instances: Vec<Instance>) -> Self {
         let (vertices, indices) = quad_data();
         let vertices = vertices
             .into_iter()

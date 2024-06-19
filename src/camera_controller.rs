@@ -1,9 +1,9 @@
 use jandering_engine::{
-    core::{
+    types::{Vec2, Vec3},
+    {
         bind_group::camera::free::CameraController,
         window::{InputState, Key, MouseButton, WindowEvent},
     },
-    types::{Vec2, Vec3},
 };
 const CAMERA_SPEED: f32 = 20.0;
 

@@ -1,80 +1,72 @@
 use jandering_engine::{
-    core::{
-        bind_group::{
-            camera::free::{CameraController, FreeCameraController, MatrixCameraBindGroup},
-            texture::TextureBindGroup,
-            BindGroup,
-        },
-        engine::{Engine, EngineContext},
-        event_handler::EventHandler,
-        object::{Instance, Object, Renderable, Vertex},
-        renderer::{
-            create_typed_bind_group, get_typed_bind_group, get_typed_bind_group_mut,
-            BindGroupHandle, Renderer, SamplerHandle, ShaderHandle, TextureHandle,
-        },
-        shader::ShaderDescriptor,
-        texture::{TextureDescriptor, TextureFormat},
-        window::{Key, WindowEvent},
-    },
-    types::Vec2,
+    bind_group::{camera::free::MatrixCameraBindGroup, texture::TextureBindGroup, BindGroup},
+    engine::{EngineContext, EventHandlerBuilder},
+    event_handler::EventHandler,
+    object::{Instance, Object, Vertex},
+    renderer::{BindGroupHandle, Janderer, Renderer, ShaderHandle, TextureHandle},
+    shader::ShaderDescriptor,
+    texture::{TextureDescriptor, TextureFormat},
     utils::load_text,
+    window::{Key, WindowEvent, WindowTrait},
 };
+use logic::create_plant;
 use rand::{rngs::ThreadRng, thread_rng};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
 
+use self::setup::{create_camera, create_objects, create_shaders, create_textures};
 use crate::{
-    color_obj::AgeObject, cylinder, image::Image, l_system::config::LConfig,
-    render_data::RenderDataBindGroup,
-};
-
-use self::{
-    logic::setups_js_inputs,
-    setup::{create_camera, create_lut_textures, create_objects, create_shaders, create_textures},
+    color_obj::AgeObject, cylinder, l_system::config::LConfig, render_data::RenderDataBindGroup,
 };
 
 pub mod logic;
 pub mod setup;
 
-lazy_static::lazy_static! {
-    #[derive(Debug)]
-    pub static ref SHADER_CODE_MUTEX: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+pub struct ApplicationBuilder {
+    shader_source: String,
 }
 
-type Plants = HashMap<(i32, i32), AgeObject>;
+impl ApplicationBuilder {
+    pub async fn new() -> Self {
+        let shader_source = load_text(jandering_engine::utils::FilePath::FileName(
+            "shaders/shader.wgsl",
+        ))
+        .await
+        .unwrap();
+        Self { shader_source }
+    }
+}
+
+impl EventHandlerBuilder<Application> for ApplicationBuilder {
+    fn build(self, renderer: &mut Renderer) -> Application {
+        Application::new(renderer, self)
+    }
+}
 
 pub struct Application {
-    last_time: web_time::Instant,
+    last_time: std::time::Instant,
     time: f32,
     shader: ShaderHandle,
     floor_shader: ShaderHandle,
     grass_shader: ShaderHandle,
     camera: BindGroupHandle<MatrixCameraBindGroup>,
-    camera_controller: Box<dyn CameraController>,
     depth_texture: TextureHandle,
 
-    plants: Plants,
+    plant: AgeObject,
     l_config: LConfig,
-    presets: HashMap<String, String>,
     floor: Object<Instance>,
 
     dust: AgeObject,
     dust_shader: ShaderHandle,
     grass: AgeObject,
-    noise_image: Image,
     noise_texture: BindGroupHandle<TextureBindGroup>,
 
     lut_texture: BindGroupHandle<TextureBindGroup>,
     lut_texture_linear: BindGroupHandle<TextureBindGroup>,
-    lut_sampler: SamplerHandle,
 
     render_data: BindGroupHandle<RenderDataBindGroup>,
 
     rng: ThreadRng,
 
-    randomize_rule_sets_timer: f32,
+    first_frame: bool,
 }
 
 const N_DUST: u32 = 60;
@@ -86,137 +78,92 @@ const ORTHO_HEIGHT: f32 = ORTHO_WIDTH;
 const ORTHO_NEAR: f32 = 0.003;
 const ORTHO_FAR: f32 = 1000.0;
 
-const RANDOMIZE_RULE_SETS_TIME_SECS: f32 = 10.0;
-
 impl Application {
-    pub async fn new(engine: &mut Engine) -> Self {
-        let (shader, floor_shader, grass_shader, dust_shader) =
-            create_shaders(engine.renderer.as_mut()).await;
+    pub fn new(renderer: &mut Renderer, builder: ApplicationBuilder) -> Self {
+        let mut rng = thread_rng();
+        let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer, &builder);
 
-        let (
-            depth_texture,
-            noise_image,
-            noise_texture,
-            lut_sampler,
-            lut_texture,
-            lut_texture_linear,
-        ) = create_textures(engine.renderer.as_mut()).await;
+        let (depth_texture, noise_image, noise_texture, lut_texture, lut_texture_linear) =
+            create_textures(renderer);
 
-        let (plants, floor, dust, grass) = create_objects(engine.renderer.as_mut());
+        let (floor, dust, grass) = create_objects(renderer, &mut rng, &noise_image);
 
-        let l_config = LConfig::default();
+        let l_config_json = pollster::block_on(load_text(
+            jandering_engine::utils::FilePath::FileName("systems/initial.json"),
+        ))
+        .unwrap();
+        let mut l_config = LConfig::from_json(l_config_json).unwrap();
+        l_config.rules.iterations = 10;
+        let plant = create_plant(renderer, &l_config, &mut rng);
 
-        let presets = setups_js_inputs().await.unwrap_or(HashMap::new());
+        let render_data = RenderDataBindGroup::new(renderer);
+        let render_data = renderer.create_typed_bind_group(render_data);
 
-        let render_data = RenderDataBindGroup::new(engine.renderer.as_mut());
-        let render_data = create_typed_bind_group(engine.renderer.as_mut(), render_data);
-
-        let camera = create_camera(engine.renderer.as_mut());
-
-        let rng = thread_rng();
+        let camera = create_camera(renderer, &mut rng);
 
         Self {
-            last_time: web_time::Instant::now(),
+            last_time: std::time::Instant::now(),
             time: 0.0,
             shader,
             camera,
-            camera_controller: Box::<FreeCameraController>::default(),
             depth_texture,
 
             grass_shader,
             floor_shader,
 
-            plants,
+            plant,
             l_config,
-            presets,
             floor,
 
             dust,
             dust_shader,
             grass,
-            noise_image,
             noise_texture,
 
             lut_texture,
             lut_texture_linear,
-            lut_sampler,
 
             render_data,
 
             rng,
 
-            randomize_rule_sets_timer: RANDOMIZE_RULE_SETS_TIME_SECS,
+            first_frame: true,
         }
     }
 }
 
 impl EventHandler for Application {
     fn on_update(&mut self, context: &mut EngineContext) {
-        let current_time = web_time::Instant::now();
+        if self.first_frame {
+            context.window.set_as_desktop();
+            self.first_frame = false;
+        }
+
+        let current_time = std::time::Instant::now();
         let dt = (current_time - self.last_time).as_secs_f32();
         self.last_time = current_time;
         self.time += dt;
 
-        let mut guard = SHADER_CODE_MUTEX.lock().unwrap();
-        if let Some(code) = guard.clone() {
+        if context.events.is_pressed(Key::V) {
+            let code = pollster::block_on(load_text(jandering_engine::utils::FilePath::FileName(
+                "shaders/shader.wgsl",
+            )))
+            .unwrap();
             context.renderer.create_shader_at(
                 ShaderDescriptor::default()
-                    .with_source(jandering_engine::core::shader::ShaderSource::Code(code))
+                    .with_source(jandering_engine::shader::ShaderSource::Code(code))
                     .with_descriptors(vec![Vertex::desc(), Instance::desc()])
                     .with_bind_group_layouts(vec![MatrixCameraBindGroup::get_layout()])
                     .with_depth(true)
                     .with_backface_culling(true),
                 self.shader,
             );
-            *guard = None;
-        }
 
-        if context.events.is_pressed(Key::V) {
-            wasm_bindgen_futures::spawn_local(async move {
-                let text = load_text(jandering_engine::utils::FilePath::FileName(
-                    "shaders/shader.wgsl",
-                ))
-                .await
-                .unwrap();
-
-                let mut guard = SHADER_CODE_MUTEX.lock().unwrap();
-                *guard = Some(text);
-            });
-        }
-
-        if context.events.is_pressed(Key::F) {
-            let aspect = {
-                let size = context.renderer.size();
-                let size = Vec2::new(size.x as f32, size.y as f32);
-                size.x / size.y
-            };
-            let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
-            std::mem::swap(
-                camera.controller.as_mut().unwrap(),
-                &mut self.camera_controller,
-            );
-            camera.make_perspective(35.0, aspect, 0.01, 10000.0);
-        }
-
-        if context.events.is_pressed(Key::G) {
-            let aspect = {
-                let size = context.renderer.size();
-                let size = Vec2::new(size.x as f32, size.y as f32);
-                size.x / size.y
-            };
-            let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
-            std::mem::swap(
-                camera.controller.as_mut().unwrap(),
-                &mut self.camera_controller,
-            );
-            camera.make_ortho(
-                (-ORTHO_WIDTH * aspect) / 2.0,
-                (ORTHO_WIDTH * aspect) / 2.0,
-                5.0 - ORTHO_HEIGHT / 2.0,
-                ORTHO_HEIGHT / 2.0,
-                ORTHO_NEAR,
-                ORTHO_FAR,
-            );
+            let l_config_json = pollster::block_on(load_text(
+                jandering_engine::utils::FilePath::FileName("systems/initial.rs"),
+            ))
+            .unwrap();
+            self.l_config = LConfig::from_json(l_config_json).unwrap();
         }
 
         if context
@@ -227,7 +174,10 @@ impl EventHandler for Application {
                 let size = context.renderer.size();
                 size.x as f32 / size.y as f32
             };
-            let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
+            let camera = context
+                .renderer
+                .get_typed_bind_group_mut(self.camera)
+                .unwrap();
             camera.make_ortho(
                 (-ORTHO_WIDTH * aspect) / 2.0,
                 (ORTHO_WIDTH * aspect) / 2.0,
@@ -247,48 +197,28 @@ impl EventHandler for Application {
             );
         }
 
-        let camera = get_typed_bind_group_mut(context.renderer.as_mut(), self.camera).unwrap();
+        let camera = context
+            .renderer
+            .get_typed_bind_group_mut(self.camera)
+            .unwrap();
         camera.update(context.events, dt);
 
-        self.randomize_rule_sets_timer -= dt;
-        if self.randomize_rule_sets_timer < 0.0 {
-            self.l_config.randomize_rule_sets(Some(1), &mut self.rng);
-            self.randomize_rule_sets_timer = RANDOMIZE_RULE_SETS_TIME_SECS;
-            log::info!("randomized rule sets");
-        }
+        self.update_dust(dt, context.renderer);
 
-        self.update_config();
-        self.spawn_new_plants(context.renderer.as_mut());
-        self.update_dust(dt, context.renderer.as_mut());
-        self.update_grass(context.renderer.as_mut());
-
-        create_lut_textures(
-            context.renderer.as_mut(),
-            Some(self.lut_texture),
-            Some(self.lut_texture_linear),
-            Some(self.lut_sampler),
-        );
-
-        self.update_iteration_count();
-
-        let render_data =
-            get_typed_bind_group_mut(context.renderer.as_mut(), self.render_data).unwrap();
+        let render_data = context
+            .renderer
+            .get_typed_bind_group_mut(self.render_data)
+            .unwrap();
         render_data.data.time = self.time;
         render_data.data.wind_strength = 0.002 + (self.time * 0.2).sin().powf(4.0).max(0.0) * 0.01;
     }
 
-    fn on_render(&mut self, renderer: &mut Box<dyn Renderer>) {
-        let camera = get_typed_bind_group(renderer.as_ref(), self.camera).unwrap();
+    fn on_render(&mut self, renderer: &mut Renderer) {
+        let camera = renderer.get_typed_bind_group(self.camera).unwrap();
         renderer.write_bind_group(self.camera.into(), &camera.get_data());
 
-        let render_data = get_typed_bind_group(renderer.as_ref(), self.render_data).unwrap();
+        let render_data = renderer.get_typed_bind_group(self.render_data).unwrap();
         renderer.write_bind_group(self.render_data.into(), &render_data.get_data());
-
-        let plants = self
-            .plants
-            .values()
-            .map(|e| e as &dyn Renderable)
-            .collect::<Vec<_>>();
 
         renderer
             .new_pass()
@@ -301,7 +231,7 @@ impl EventHandler for Application {
             .bind(3, self.lut_texture.into())
             .render(&[&self.floor])
             .set_shader(self.shader)
-            .render(&plants)
+            .render(&[&self.plant])
             .set_shader(self.dust_shader)
             .render(&[&self.dust])
             .bind(3, self.lut_texture_linear.into())

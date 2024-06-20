@@ -1,5 +1,10 @@
+#![windows_subsystem = "windows"]
+
 use application::ApplicationBuilder;
-use jandering_engine::{engine::EngineBuilder, window::WindowConfig};
+use jandering_engine::{
+    engine::EngineBuilder,
+    window::{FpsPreference, WindowConfig},
+};
 
 mod application;
 mod camera_controller;
@@ -19,7 +24,8 @@ fn main() {
                 .with_cursor(true)
                 .with_auto_resolution()
                 .with_title("heyy")
-                .with_cursor(true),
+                .with_cursor(true)
+                .with_fps_preference(FpsPreference::Exact(30)),
         )
         .run(app_builder);
 }

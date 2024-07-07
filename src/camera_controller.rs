@@ -18,7 +18,7 @@ pub struct IsometricCameraController {
     pub speed_multiplier: f32,
     pub velocity: Vec3,
 
-    pub last_mouse_position: Option<Vec2>,
+    // pub last_mouse_position: Option<Vec2>,
     pub mouse_down: bool,
     pub pan_delta: Vec2,
 }
@@ -38,7 +38,7 @@ impl Default for IsometricCameraController {
                 y: 0.0,
                 z: 0.0,
             },
-            last_mouse_position: None,
+            // last_mouse_position: None,
             mouse_down: false,
             pan_delta: Vec2::ZERO,
         }
@@ -46,27 +46,33 @@ impl Default for IsometricCameraController {
 }
 
 impl IsometricCameraController {
-    fn mouse_motion(&mut self, position: Vec2) {
-        if !self.mouse_down {
-            return;
-        }
+    // fn mouse_motion(&mut self, position: Vec2) {
+    //     if !self.mouse_down {
+    //         return;
+    //     }
 
-        if let Some(last_mouse_position) = &mut self.last_mouse_position {
-            self.pan_delta += position - *last_mouse_position;
-        }
+    //     if let Some(last_mouse_position) = &mut self.last_mouse_position {
+    //         self.pan_delta += position - *last_mouse_position;
+    //     }
 
-        self.last_mouse_position = Some(position);
-    }
+    //     self.last_mouse_position = Some(position);
+    // }
 }
 
 impl CameraController for IsometricCameraController {
     fn event(&mut self, event: WindowEvent) {
         match event {
-            WindowEvent::MouseMotion(position) => {
-                self.mouse_motion(Vec2::from(position));
+            // WindowEvent::MouseMotion(position) => {
+            //     self.mouse_motion(Vec2::from(position));
+            // }
+            WindowEvent::RawMouseMotion(delta) => {
+                if self.mouse_down {
+                    self.pan_delta.x += delta.0;
+                    self.pan_delta.y += delta.1;
+                }
             }
             WindowEvent::MouseLeft => {
-                self.last_mouse_position = None;
+                // self.last_mouse_position = None;
             }
             WindowEvent::MouseInput {
                 button: MouseButton::Left,
@@ -74,9 +80,9 @@ impl CameraController for IsometricCameraController {
             } => {
                 self.mouse_down = {
                     let val = matches!(state, InputState::Pressed);
-                    if !val {
-                        self.last_mouse_position = None;
-                    }
+                    // if !val {
+                    //     self.last_mouse_position = None;
+                    // }
                     val
                 };
             }

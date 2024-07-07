@@ -18,9 +18,9 @@ hex_color = "3.0.0"
 lazy_static = "1.4.0"
 raw-window-handle = "0.5"
 
-[dependencies.jandering_engine]
-path = "../jandering_engine - Copy"
-
 [dependencies.windows]
 version = "0.57"
 features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"]
+
+[dependencies.jandering_engine]
+path = "../jandering_engine - Copy"

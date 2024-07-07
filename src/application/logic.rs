@@ -122,18 +122,18 @@ pub fn place_pos_on_heightmap(
     )
 }
 
-pub fn create_plant(renderer: &mut Renderer, l_config: &LConfig, rng: &mut ThreadRng) -> AgeObject {
+pub fn create_plant_data(l_config: &LConfig, rng: &mut ThreadRng) -> (Vec<AgeVertex>, Vec<u32>) {
     let shapes = l_system::build(l_config, rng);
     if let Some((vertices, indices)) = shapes_to_mesh_data(shapes) {
-        AgeObject::new(
-            renderer,
-            vertices,
-            indices,
-            vec![Instance::default().translate(Vec3::splat(0.0))],
-        )
+        (vertices, indices)
     } else {
-        AgeObject::new(renderer, Vec::new(), Vec::new(), Vec::new())
+        (Vec::new(), Vec::new())
     }
+}
+
+pub fn create_plant(renderer: &mut Renderer, l_config: &LConfig, rng: &mut ThreadRng) -> AgeObject {
+    let (vertices, indices) = create_plant_data(l_config, rng);
+    AgeObject::new(renderer, vertices, indices, vec![Instance::default()])
 }
 
 pub fn shapes_to_mesh_data(shapes: Vec<RenderShape>) -> Option<(Vec<AgeVertex>, Vec<u32>)> {

@@ -21,8 +21,8 @@ use crate::{
 
 use super::{
     logic::{parse_lut, place_pos_on_heightmap},
-    ApplicationBuilder, RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT, ORTHO_NEAR,
-    ORTHO_WIDTH, REFERENCE_DIAGONAL,
+    RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT, ORTHO_NEAR, ORTHO_WIDTH,
+    REFERENCE_DIAGONAL,
 };
 const GRASS_RANGE: f32 = 2.75;
 const GRASS_ITERATIONS: u32 = 12;
@@ -31,19 +31,17 @@ const GRASS_WIDTH: f32 = 0.0075;
 
 pub fn create_camera(
     renderer: &mut Renderer,
-    rng: &mut ThreadRng,
+    size: Vec2,
 ) -> BindGroupHandle<MatrixCameraBindGroup> {
-    let (aspect, diagonal) = {
-        let size = renderer.size();
-        let size = Vec2::new(size.x as f32, size.y as f32);
-        (size.x / size.y, (size.x * size.x + size.y * size.y).sqrt())
-    };
+    let aspect = size.x / size.y;
+    let diagonal = (size.x * size.x + size.y * size.y).sqrt();
     let controller = IsometricCameraController {
         pan_speed: 0.002 * (diagonal / REFERENCE_DIAGONAL),
         ..Default::default()
     };
-    let controller: Box<dyn CameraController> = Box::new(controller);
-    let mut camera = MatrixCameraBindGroup::with_controller(controller);
+    // let controller: Box<dyn CameraController> = Box::new(controller);
+    // let mut camera = MatrixCameraBindGroup::with_controller(controller);
+    let mut camera = MatrixCameraBindGroup::default();
     camera.make_ortho(
         (-ORTHO_WIDTH * aspect) / 2.0,
         (ORTHO_WIDTH * aspect) / 2.0,
@@ -114,7 +112,7 @@ pub fn create_textures(
 ) {
     let (lut_texture, lut_texture_linear) = create_lut_textures(renderer, None, None, None);
     let depth_texture = renderer.create_texture(TextureDescriptor {
-        size: renderer.size(),
+        size: (100, 100).into(),
         format: TextureFormat::Depth32F,
         ..Default::default()
     });
@@ -144,13 +142,17 @@ pub fn create_textures(
     )
 }
 
-pub fn create_shaders(
+pub async fn create_shaders(
     renderer: &mut Renderer,
-    builder: &ApplicationBuilder,
 ) -> (ShaderHandle, ShaderHandle, ShaderHandle, ShaderHandle) {
+    let shader_source = load_text(jandering_engine::utils::FilePath::FileName(
+        "shaders/shader.wgsl",
+    ))
+    .await
+    .unwrap();
     let descriptor = ShaderDescriptor::default()
         .with_source(jandering_engine::shader::ShaderSource::Code(
-            builder.shader_source.clone(),
+            shader_source.clone(),
         ))
         .with_descriptors(vec![AgeVertex::desc(), Instance::desc()])
         .with_depth(true)
@@ -201,7 +203,6 @@ pub fn create_lut_textures(
     let data = parse_lut(&lut_json, false)
         .unwrap_or_default()
         .iter()
-        .take(renderer.max_texture_size().x as usize)
         .flat_map(|e| {
             [
                 (e.x * 255.0) as u8,
@@ -240,7 +241,6 @@ pub fn create_lut_textures(
     let data = parse_lut(&lut_json, true)
         .unwrap_or_default()
         .iter()
-        .take(renderer.max_texture_size().x as usize)
         .flat_map(|e| {
             [
                 (e.x * 255.0) as u8,

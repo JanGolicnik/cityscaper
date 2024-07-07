@@ -1,10 +1,7 @@
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
-use application::ApplicationBuilder;
-use jandering_engine::{
-    engine::EngineBuilder,
-    window::{FpsPreference, WindowConfig},
-};
+use application::Application;
+use jandering_engine::engine::Engine;
 
 mod application;
 mod camera_controller;
@@ -16,16 +13,9 @@ mod l_system;
 mod render_data;
 
 fn main() {
-    let app_builder = pollster::block_on(ApplicationBuilder::new());
+    let mut engine = pollster::block_on(Engine::new());
 
-    EngineBuilder::default()
-        .with_window(
-            WindowConfig::default()
-                .with_cursor(true)
-                .with_auto_resolution()
-                .with_title("heyy")
-                .with_cursor(true)
-                .with_fps_preference(FpsPreference::Exact(30)),
-        )
-        .run(app_builder);
+    let app = pollster::block_on(Application::new(&mut engine));
+
+    pollster::block_on(engine.run(app));
 }

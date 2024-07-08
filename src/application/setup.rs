@@ -105,6 +105,7 @@ pub fn create_textures(
     renderer: &mut Renderer,
 ) -> (
     TextureHandle,
+    TextureHandle,
     Image,
     BindGroupHandle<TextureBindGroup>,
     BindGroupHandle<TextureBindGroup>,
@@ -114,6 +115,12 @@ pub fn create_textures(
     let depth_texture = renderer.create_texture(TextureDescriptor {
         size: (100, 100).into(),
         format: TextureFormat::Depth32F,
+                    sample_count: 4,
+                    ..Default::default()
+    });
+    let multisample_texture = renderer.create_texture(TextureDescriptor {
+        size: (100, 100).into(),
+        sample_count: 4,
         ..Default::default()
     });
     let noise_image = image::load_from_memory(include_bytes!("../../res/noise.png")).unwrap();
@@ -135,6 +142,7 @@ pub fn create_textures(
 
     (
         depth_texture,
+        multisample_texture,
         noise_image,
         noise_texture,
         lut_texture,
@@ -157,6 +165,7 @@ pub async fn create_shaders(
         .with_descriptors(vec![AgeVertex::desc(), Instance::desc()])
         .with_depth(true)
         .with_backface_culling(false)
+        .with_multisample(4)
         .with_bind_group_layouts(vec![
             MatrixCameraBindGroup::get_layout(),
             RenderDataBindGroup::get_layout(),

@@ -34,6 +34,7 @@ pub struct Application {
     grass_shader: ShaderHandle,
     camera: BindGroupHandle<MatrixCameraBindGroup>,
     depth_texture: TextureHandle,
+    multisample_texture: TextureHandle,
 
     plant: AgeObject,
     l_config: LConfig,
@@ -90,7 +91,7 @@ impl Application {
         let mut rng = rand::thread_rng();
         let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer).await;
 
-        let (depth_texture, noise_image, noise_texture, lut_texture, lut_texture_linear) =
+        let (depth_texture, multisample_texture, noise_image, noise_texture, lut_texture, lut_texture_linear) =
             create_textures(renderer);
 
         let (floor, dust, grass) = create_objects(renderer, &mut rng, &noise_image);
@@ -114,6 +115,7 @@ impl Application {
             shader,
             camera: BindGroupHandle(0, std::marker::PhantomData::<MatrixCameraBindGroup>),
             depth_texture,
+            multisample_texture,
 
             grass_shader,
             floor_shader,
@@ -165,9 +167,19 @@ impl Application {
                 TextureDescriptor {
                     size: size.into(),
                     format: TextureFormat::Depth32F,
+                    sample_count: 4,
                     ..Default::default()
                 },
                 self.depth_texture,
+            );
+
+            context.renderer.re_create_texture(
+                TextureDescriptor {
+                    size: size.into(),
+                    sample_count: 4,
+                    ..Default::default()
+                },
+                self.multisample_texture,
             );
         }
 
@@ -206,7 +218,7 @@ impl Application {
             .window_manager
             .get_window(self.input_window_handle)
             .unwrap();
-
+        
         window.set_absolute_position(
             input_window_position.x as i32 - window.width() as i32 / 2,
             input_window_position.y as i32 - window.height() as i32,
@@ -308,9 +320,19 @@ impl EventHandler for Application {
             TextureDescriptor {
                 size: resolution.into(),
                 format: TextureFormat::Depth32F,
-                ..Default::default()
+                    sample_count: 4,
+                    ..Default::default()
             },
             self.depth_texture,
+        );
+
+        renderer.re_create_texture(
+            TextureDescriptor {
+                size: resolution.into(),
+                sample_count: 4,
+                ..Default::default()
+            },
+            self.multisample_texture,
         );
 
         self.put_input_window_above_icons(
@@ -332,6 +354,7 @@ impl EventHandler for Application {
         renderer
             .new_pass(self.main_window_handle)
             .with_depth(self.depth_texture, Some(1.0))
+            .with_target_texture_resolve(self.multisample_texture, None)
             .with_clear_color(0.2, 0.5, 1.0)
             .set_shader(self.floor_shader)
             .bind(0, self.camera.into())

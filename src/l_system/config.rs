@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use is_none_or::IsNoneOr;
-use rand::{rngs::ThreadRng, Rng};
+use rand::{rngs::Rng, Rng};
 
 use super::RenderConfig;
 
@@ -71,7 +71,7 @@ impl Values {
         Self::Default
     }
 
-    pub fn get(&self, default: f32, rng: &mut ThreadRng) -> f32 {
+    pub fn get(&self, default: f32, rng: &mut Rng) -> f32 {
         let val = match self {
             Values::Multiple(vec) => {
                 let i = rng.gen_range(0..vec.len());
@@ -304,14 +304,14 @@ impl LConfig {
         }
     }
 
-    pub fn get_rule(&self, id: &char, rng: &mut ThreadRng, age: f32) -> Option<&[LSymbol]> {
+    pub fn get_rule(&self, id: &char, rng: &mut Rng, age: f32) -> Option<&[LSymbol]> {
         self.rules.rule_sets.get(id).and_then(|sets| {
             let rules = &sets.sets[sets.current].rules;
             pick_rule(rules, rng, age)
         })
     }
 
-    pub fn randomize_rule_sets(&mut self, n: Option<u32>, rng: &mut ThreadRng) {
+    pub fn randomize_rule_sets(&mut self, n: Option<u32>, rng: &mut Rng) {
         if let Some(n) = n {
             let mut indices = self.rules.rule_sets.keys().copied().collect::<Vec<_>>();
             for _ in 0..n.min(indices.len() as u32) {
@@ -331,7 +331,7 @@ impl LConfig {
 
 fn pick_rule<'rules>(
     rules: &'rules [LRule],
-    rng: &mut ThreadRng,
+    rng: &mut Rng,
     age: f32,
 ) -> Option<&'rules [LSymbol]> {
     let filtered = rules.iter().filter(|rule| {

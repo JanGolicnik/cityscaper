@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jandering_engine::types::{Qua, Vec3};
-use rand::rngs::ThreadRng;
+use rand::rngs::Rng;
 use serde::Deserialize;
 
 use self::config::{LConfig, LSymbol};
@@ -66,11 +66,13 @@ impl State {
     }
 }
 
-pub fn build(config: &LConfig, rng: &mut ThreadRng) -> Vec<RenderShape> {
+pub fn build(config: &LConfig, rng: &mut Rng, test_age: f32) -> Vec<RenderShape> {
     let mut states = vec![State {
         scale: 1.0,
         ..Default::default()
     }];
+
+    let rng = rand_chacha::ChaCha20Rng::from_seed(123);
 
     let mut shapes = Vec::new();
 
@@ -81,6 +83,7 @@ pub fn build(config: &LConfig, rng: &mut ThreadRng) -> Vec<RenderShape> {
         config,
         rng,
         0,
+        test_age
     );
 
     shapes
@@ -91,10 +94,25 @@ fn build_symbols(
     shapes: &mut Vec<RenderShape>,
     symbols: &[LSymbol],
     config: &LConfig,
-    rng: &mut ThreadRng,
+    rng: &mut Rng,
     iteration: u32,
+    test_age: f32
 ) {
     let age = iteration as f32 / config.rules.iterations as f32;
+
+    let test2 = test_age * config.rules.iterations as f32; // 1.5
+    let test = test2 - iteration as f32;
+    let len = {
+        if test >= 0.0
+        {
+            test.min(1.0)
+        }
+        else
+        {
+            let dif = (test2.floor() - iteration as f32).abs() + 1.0;
+            test2.fract() / dif as f32
+        }
+    };
 
     let symbol_to_axis = |symbol: &LSymbol| match &symbol {
         LSymbol::RotateY(_) => Vec3::Y,
@@ -122,7 +140,7 @@ fn build_symbols(
             }
             LSymbol::Object { id, .. } => {
                 if let Some(shape) =
-                    get_shape(id, age, &config.rendering, states.last_mut().unwrap())
+                    get_shape(id, age, &config.rendering, states.last_mut().unwrap(), len)
                 {
                     shapes.push(shape)
                 }
@@ -141,12 +159,12 @@ fn build_symbols(
                 states.last_mut().unwrap().scale *= values.get(1.0, rng);
             }
             LSymbol::Rule(id) => {
-                if age > 1.0 {
+                if age > 1.0 || test_age < 0.1 {
                     continue;
                 }
 
                 if let Some(rule) = config.get_rule(id, rng, age) {
-                    build_symbols(states, shapes, rule, config, rng, iteration + 1);
+                    build_symbols(states, shapes, rule, config, rng, iteration + 1, test_age);
                 }
             }
         }
@@ -158,14 +176,16 @@ fn get_shape(
     age: f32,
     render_config: &RenderConfig,
     state: &mut State,
+    len_mod: f32
 ) -> Option<RenderShape> {
     if let Some(shape) = render_config.shapes.get(id) {
         let shape = match shape {
             Shape::Line { width, length } => {
+                let length = *length * len_mod;
                 let end = state.position
                     + state
                         .rotation
-                        .mul_vec3(Vec3::new(0.0, *length * state.scale, 0.0));
+                        .mul_vec3(Vec3::new(0.0, length * state.scale, 0.0));
                 let start = state.position;
                 state.position = end;
                 RenderShape::Line {
@@ -182,10 +202,11 @@ fn get_shape(
                 age,
             },
             Shape::Branch { width, length } => {
+                let length = *length * len_mod;
                 let end = state.position
                     + state
                         .rotation
-                        .mul_vec3(Vec3::new(0.0, *length * state.scale, 0.0));
+                        .mul_vec3(Vec3::new(0.0, length * state.scale, 0.0));
                 let start = state.position;
                 state.position = end;
                 RenderShape::Line {

@@ -14,8 +14,10 @@ use jandering_engine::{
     },
 };
 use logic::{create_plant, create_plant_data};
-use rand::rngs::ThreadRng;
+use rand::SeedableRng;
 use setup::{create_camera, create_objects, create_shaders, create_textures};
+
+pub type Rng = rand_chacha::ChaCha20Rng;
 
 use crate::{
     color_obj::AgeObject, cylinder, l_system::config::LConfig, render_data::RenderDataBindGroup,
@@ -50,7 +52,7 @@ pub struct Application {
 
     render_data: BindGroupHandle<RenderDataBindGroup>,
 
-    rng: ThreadRng,
+    rng: Rng,
 }
 
 const N_DUST: u32 = 60;
@@ -88,7 +90,7 @@ impl Application {
             (main_window_handle, input_window_handle)
         };
         let renderer = &mut engine.renderer;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(123);
         let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer).await;
 
         let (depth_texture, multisample_texture, noise_image, noise_texture, lut_texture, lut_texture_linear) =
@@ -262,8 +264,6 @@ impl Application {
             hwnd: windows::Win32::Foundation::HWND,
             l_param: windows::Win32::Foundation::LPARAM,
         ) -> windows::Win32::Foundation::BOOL {
-            let out_hwnd = l_param.0 as *mut windows::Win32::Foundation::HWND;
-
             let p: windows::Win32::Foundation::HWND =
                 windows::Win32::UI::WindowsAndMessaging::FindWindowExA(
                     hwnd,
@@ -273,7 +273,8 @@ impl Application {
                 );
 
             if p.0 != 0 {
-                *out_hwnd = p;
+                let out_hwnd = l_param.0 as *mut windows::Win32::Foundation::HWND;
+                *out_hwnd = hwnd;
             }
             windows::Win32::Foundation::TRUE
         }
@@ -368,7 +369,7 @@ impl EventHandler for Application {
             .render(&[&self.dust])
             .bind(3, self.lut_texture_linear.into())
             .set_shader(self.grass_shader)
-            .render(&[&self.grass])
+            // .render(&[&self.grass])
             .submit();
 
         renderer

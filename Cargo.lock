@@ -1217,6 +1217,7 @@ dependencies = [
  "pollster",
  "prev-iter",
  "rand",
+ "rand_chacha",
  "raw-window-handle",
  "regex",
  "serde",

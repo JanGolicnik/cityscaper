@@ -11,7 +11,7 @@ use jandering_engine::{
     types::{Mat4, Qua, UVec2, Vec2, Vec3},
     utils::load_text,
 };
-use rand::{rngs::ThreadRng, Rng};
+use rand::{Rng};
 
 use crate::{
     camera_controller::IsometricCameraController,
@@ -39,9 +39,9 @@ pub fn create_camera(
         pan_speed: 0.002 * (diagonal / REFERENCE_DIAGONAL),
         ..Default::default()
     };
-    // let controller: Box<dyn CameraController> = Box::new(controller);
-    // let mut camera = MatrixCameraBindGroup::with_controller(controller);
-    let mut camera = MatrixCameraBindGroup::default();
+    let controller: Box<dyn CameraController> = Box::new(controller);
+    let mut camera = MatrixCameraBindGroup::with_controller(controller);
+    // let mut camera = MatrixCameraBindGroup::default();
     camera.make_ortho(
         (-ORTHO_WIDTH * aspect) / 2.0,
         (ORTHO_WIDTH * aspect) / 2.0,
@@ -54,7 +54,7 @@ pub fn create_camera(
     *camera.direction_mut() = Vec3::new(1.0, -1.0, 1.0).normalize();
     renderer.create_typed_bind_group(camera)
 }
-pub fn create_grass(rng: &mut ThreadRng, noise_image: &Image) -> Vec<Instance> {
+pub fn create_grass(rng: &mut Rng, noise_image: &Image) -> Vec<Instance> {
     (0..N_GRASS)
         .map(|_| {
             let dist = rng.gen::<f32>();
@@ -80,7 +80,7 @@ pub fn create_grass(rng: &mut ThreadRng, noise_image: &Image) -> Vec<Instance> {
 
 pub fn create_objects(
     renderer: &mut Renderer,
-    rng: &mut ThreadRng,
+    rng: &mut super::Rng,
     noise_image: &Image,
 ) -> (Object<Instance>, AgeObject, AgeObject) {
     let floor = Object::quad(

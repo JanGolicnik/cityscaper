@@ -3,7 +3,7 @@ use jandering_engine::{
     renderer::{Janderer, Renderer},
     types::{Mat4, Qua, Vec2, Vec3},
 };
-use rand::{rngs::ThreadRng, Rng};
+use rand::Rng;
 use serde::Deserialize;
 
 use crate::{
@@ -100,7 +100,7 @@ pub fn place_pos_on_heightmap(
     mut pos: Vec3,
     iterations: u32,
     heightmap: &Image,
-    rng: &mut ThreadRng,
+    rng: &mut super::Rng,
 ) -> Vec3 {
     for _ in 0..=iterations {
         let mut highest_val = heightmap.sample(pos.x, pos.z);
@@ -122,8 +122,8 @@ pub fn place_pos_on_heightmap(
     )
 }
 
-pub fn create_plant_data(l_config: &LConfig, rng: &mut ThreadRng) -> (Vec<AgeVertex>, Vec<u32>) {
-    let shapes = l_system::build(l_config, rng);
+pub fn create_plant_data(l_config: &LConfig, rng: &mut super::Rng) -> (Vec<AgeVertex>, Vec<u32>) {
+    let shapes = l_system::build(l_config, rng, 0.5);
     if let Some((vertices, indices)) = shapes_to_mesh_data(shapes) {
         (vertices, indices)
     } else {
@@ -131,7 +131,7 @@ pub fn create_plant_data(l_config: &LConfig, rng: &mut ThreadRng) -> (Vec<AgeVer
     }
 }
 
-pub fn create_plant(renderer: &mut Renderer, l_config: &LConfig, rng: &mut ThreadRng) -> AgeObject {
+pub fn create_plant(renderer: &mut Renderer, l_config: &LConfig, rng: &mut super::Rng) -> AgeObject {
     let (vertices, indices) = create_plant_data(l_config, rng);
     AgeObject::new(renderer, vertices, indices, vec![Instance::default()])
 }

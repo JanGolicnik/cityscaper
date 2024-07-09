@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use is_none_or::IsNoneOr;
-use rand::{rngs::Rng, Rng};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 
 use super::RenderConfig;
 
@@ -71,7 +72,7 @@ impl Values {
         Self::Default
     }
 
-    pub fn get(&self, default: f32, rng: &mut Rng) -> f32 {
+    pub fn get(&self, default: f32, rng: &mut super::LRng) -> f32 {
         let val = match self {
             Values::Multiple(vec) => {
                 let i = rng.gen_range(0..vec.len());
@@ -93,7 +94,7 @@ pub enum LSymbol {
     Scope,
     ScopeEnd,
     Rule(char),
-    Object { id: char, age: u32 },
+    Object { id: char },
     RotateX(Values),
     RotateNegX(Values),
     RotateY(Values),
@@ -130,10 +131,90 @@ pub struct LSystemBuildConfig {
     pub rule_sets: HashMap<char, LRuleSets>,
 }
 
-#[derive(Default)]
 pub struct LConfig {
     pub rendering: RenderConfig,
     pub rules: LSystemBuildConfig,
+    pub interpolation: f32,
+    pub(crate) rng: RefCell<ChaCha20Rng>,
+    pub seed: u64,
+}
+
+impl Default for LConfig {
+    fn default() -> Self {
+        Self {
+            rendering: Default::default(),
+            rules: Default::default(),
+            interpolation: Default::default(),
+            rng: RefCell::new(rand_chacha::ChaCha20Rng::seed_from_u64(0)),
+            seed: 0,
+        }
+    }
+}
+
+impl LConfig {
+    pub fn from_json(json: String) -> Result<Self, String> {
+        match serde_json::from_str::<json::LConfigJSON>(&json) {
+            Ok(json::LConfigJSON { rendering, rules }) => Ok(Self {
+                rendering,
+                rules: rules.into(),
+                ..Default::default()
+            }),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    pub fn get_rule(&self, id: &char, age: f32) -> Option<&[LSymbol]> {
+        self.rules.rule_sets.get(id).and_then(|sets| {
+            let rules = &sets.sets[sets.current].rules;
+            pick_rule(rules, age, &mut self.rng.borrow_mut())
+        })
+    }
+
+    pub fn randomize_rule_sets(&mut self, n: Option<u32>) {
+        let rng = self.rng.get_mut();
+        if let Some(n) = n {
+            let mut indices = self.rules.rule_sets.keys().copied().collect::<Vec<_>>();
+            for _ in 0..n.min(indices.len() as u32) {
+                let i = rng.gen_range(0..indices.len());
+                let key = indices.remove(i);
+                let set = self.rules.rule_sets.get_mut(&key).unwrap();
+                set.current = rng.gen_range(0..set.sets.len());
+            }
+        } else {
+            self.rules
+                .rule_sets
+                .iter_mut()
+                .for_each(|(_, set)| set.current = rng.gen_range(0..set.sets.len()));
+        }
+    }
+
+    pub fn reseed(&mut self, seed: u64) {
+        *self.rng.borrow_mut() = rand_chacha::ChaCha20Rng::seed_from_u64(seed);
+        self.seed = seed;
+    }
+}
+
+fn pick_rule<'rules>(
+    rules: &'rules [LRule],
+    age: f32,
+    rng: &mut super::LRng,
+) -> Option<&'rules [LSymbol]> {
+    let filtered = rules.iter().filter(|rule| {
+        rule.min_gen.is_none_or(|v| age >= v) && rule.max_gen.is_none_or(|v| age < v)
+    });
+    let max_chance = filtered.clone().fold(0.0, |acc, rule| acc + rule.chance);
+    if max_chance <= 0.0 {
+        return None;
+    }
+    let n = rng.gen_range(0.0..max_chance);
+    let mut t = 0.0;
+    for rule in filtered {
+        t += rule.chance;
+        if t > n {
+            return Some(&rule.result);
+        }
+    }
+    None
 }
 
 mod json {
@@ -280,7 +361,7 @@ mod json {
                     symbols.push(symbol);
                 }
                 symbol if symbol.is_ascii() && symbol.is_lowercase() => {
-                    symbols.push(LSymbol::Object { id: symbol, age: 0 });
+                    symbols.push(LSymbol::Object { id: symbol });
                 }
                 symbol if symbol.is_ascii() && symbol.is_uppercase() => {
                     symbols.push(LSymbol::Rule(symbol));
@@ -291,63 +372,4 @@ mod json {
 
         symbols
     }
-}
-
-impl LConfig {
-    pub fn from_json(json: String) -> Result<Self, String> {
-        match serde_json::from_str::<json::LConfigJSON>(&json) {
-            Ok(json::LConfigJSON { rendering, rules }) => Ok(Self {
-                rendering,
-                rules: rules.into(),
-            }),
-            Err(err) => Err(err.to_string()),
-        }
-    }
-
-    pub fn get_rule(&self, id: &char, rng: &mut Rng, age: f32) -> Option<&[LSymbol]> {
-        self.rules.rule_sets.get(id).and_then(|sets| {
-            let rules = &sets.sets[sets.current].rules;
-            pick_rule(rules, rng, age)
-        })
-    }
-
-    pub fn randomize_rule_sets(&mut self, n: Option<u32>, rng: &mut Rng) {
-        if let Some(n) = n {
-            let mut indices = self.rules.rule_sets.keys().copied().collect::<Vec<_>>();
-            for _ in 0..n.min(indices.len() as u32) {
-                let i = rng.gen_range(0..indices.len());
-                let key = indices.remove(i);
-                let set = self.rules.rule_sets.get_mut(&key).unwrap();
-                set.current = rng.gen_range(0..set.sets.len());
-            }
-        } else {
-            self.rules
-                .rule_sets
-                .iter_mut()
-                .for_each(|(_, set)| set.current = rng.gen_range(0..set.sets.len()));
-        }
-    }
-}
-
-fn pick_rule<'rules>(
-    rules: &'rules [LRule],
-    rng: &mut Rng,
-    age: f32,
-) -> Option<&'rules [LSymbol]> {
-    let filtered = rules.iter().filter(|rule| {
-        rule.min_gen.is_none_or(|v| age >= v) && rule.max_gen.is_none_or(|v| age < v)
-    });
-    let max_chance = filtered.clone().fold(0.0, |acc, rule| acc + rule.chance);
-    if max_chance <= 0.0 {
-        return None;
-    }
-    let n = rng.gen_range(0.0..max_chance);
-    let mut t = 0.0;
-    for rule in filtered {
-        t += rule.chance;
-        if t > n {
-            return Some(&rule.result);
-        }
-    }
-    None
 }

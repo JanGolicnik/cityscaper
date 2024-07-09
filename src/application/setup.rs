@@ -11,7 +11,7 @@ use jandering_engine::{
     types::{Mat4, Qua, UVec2, Vec2, Vec3},
     utils::load_text,
 };
-use rand::{Rng};
+use rand::{rngs::ThreadRng, Rng};
 
 use crate::{
     camera_controller::IsometricCameraController,
@@ -54,7 +54,7 @@ pub fn create_camera(
     *camera.direction_mut() = Vec3::new(1.0, -1.0, 1.0).normalize();
     renderer.create_typed_bind_group(camera)
 }
-pub fn create_grass(rng: &mut Rng, noise_image: &Image) -> Vec<Instance> {
+pub fn create_grass(rng: &mut ThreadRng, noise_image: &Image) -> Vec<Instance> {
     (0..N_GRASS)
         .map(|_| {
             let dist = rng.gen::<f32>();
@@ -80,7 +80,7 @@ pub fn create_grass(rng: &mut Rng, noise_image: &Image) -> Vec<Instance> {
 
 pub fn create_objects(
     renderer: &mut Renderer,
-    rng: &mut super::Rng,
+    rng: &mut ThreadRng,
     noise_image: &Image,
 ) -> (Object<Instance>, AgeObject, AgeObject) {
     let floor = Object::quad(
@@ -115,8 +115,8 @@ pub fn create_textures(
     let depth_texture = renderer.create_texture(TextureDescriptor {
         size: (100, 100).into(),
         format: TextureFormat::Depth32F,
-                    sample_count: 4,
-                    ..Default::default()
+        sample_count: 4,
+        ..Default::default()
     });
     let multisample_texture = renderer.create_texture(TextureDescriptor {
         size: (100, 100).into(),

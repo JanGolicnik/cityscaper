@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
 use jandering_engine::types::{Qua, Vec3};
-use rand::rngs::Rng;
+use rand::SeedableRng;
 use serde::Deserialize;
 
 use self::config::{LConfig, LSymbol};
 
 pub mod colors;
 pub mod config;
+
+type LRng = rand_chacha::ChaCha20Rng;
 
 #[derive(serde::Deserialize, Clone)]
 enum Shape {
@@ -66,13 +68,11 @@ impl State {
     }
 }
 
-pub fn build(config: &LConfig, rng: &mut Rng, test_age: f32) -> Vec<RenderShape> {
+pub fn build(config: &LConfig) -> Vec<RenderShape> {
     let mut states = vec![State {
         scale: 1.0,
         ..Default::default()
     }];
-
-    let rng = rand_chacha::ChaCha20Rng::from_seed(123);
 
     let mut shapes = Vec::new();
 
@@ -81,9 +81,7 @@ pub fn build(config: &LConfig, rng: &mut Rng, test_age: f32) -> Vec<RenderShape>
         &mut shapes,
         &config.rules.initial.clone(),
         config,
-        rng,
         0,
-        test_age
     );
 
     shapes
@@ -94,24 +92,14 @@ fn build_symbols(
     shapes: &mut Vec<RenderShape>,
     symbols: &[LSymbol],
     config: &LConfig,
-    rng: &mut Rng,
     iteration: u32,
-    test_age: f32
 ) {
-    let age = iteration as f32 / config.rules.iterations as f32;
+    let age = iteration as f32 / config.rules.iterations.saturating_sub(1) as f32;
 
-    let test2 = test_age * config.rules.iterations as f32; // 1.5
-    let test = test2 - iteration as f32;
-    let len = {
-        if test >= 0.0
-        {
-            test.min(1.0)
-        }
-        else
-        {
-            let dif = (test2.floor() - iteration as f32).abs() + 1.0;
-            test2.fract() / dif as f32
-        }
+    let len_mod = {
+        let lerp_age = config.interpolation * config.rules.iterations as f32;
+        let t = lerp_age / (iteration + 1) as f32;
+        t.min(1.0)
     };
 
     let symbol_to_axis = |symbol: &LSymbol| match &symbol {
@@ -138,10 +126,14 @@ fn build_symbols(
                     states[0] = State::default()
                 }
             }
-            LSymbol::Object { id, .. } => {
-                if let Some(shape) =
-                    get_shape(id, age, &config.rendering, states.last_mut().unwrap(), len)
-                {
+            LSymbol::Object { id } => {
+                if let Some(shape) = get_shape(
+                    id,
+                    age,
+                    &config.rendering,
+                    states.last_mut().unwrap(),
+                    len_mod,
+                ) {
                     shapes.push(shape)
                 }
             }
@@ -151,20 +143,23 @@ fn build_symbols(
             | LSymbol::RotateNegY(values)
             | LSymbol::RotateZ(values)
             | LSymbol::RotateNegZ(values) => {
-                let angle = values.get(config.rendering.default_angle_change, rng);
+                let angle = values.get(
+                    config.rendering.default_angle_change,
+                    &mut config.rng.borrow_mut(),
+                );
                 states.last_mut().unwrap().rotation *=
                     Qua::from_axis_angle(symbol_to_axis(symbol), angle.to_radians());
             }
             LSymbol::Scale(values) => {
-                states.last_mut().unwrap().scale *= values.get(1.0, rng);
+                states.last_mut().unwrap().scale *= values.get(1.0, &mut config.rng.borrow_mut());
             }
             LSymbol::Rule(id) => {
-                if age > 1.0 || test_age < 0.1 {
+                if age >= 1.0 || len_mod < 0.1 {
                     continue;
                 }
 
-                if let Some(rule) = config.get_rule(id, rng, age) {
-                    build_symbols(states, shapes, rule, config, rng, iteration + 1, test_age);
+                if let Some(rule) = config.get_rule(id, age) {
+                    build_symbols(states, shapes, rule, config, iteration + 1);
                 }
             }
         }
@@ -176,7 +171,7 @@ fn get_shape(
     age: f32,
     render_config: &RenderConfig,
     state: &mut State,
-    len_mod: f32
+    len_mod: f32,
 ) -> Option<RenderShape> {
     if let Some(shape) = render_config.shapes.get(id) {
         let shape = match shape {

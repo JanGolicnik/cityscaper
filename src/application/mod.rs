@@ -13,11 +13,10 @@ use jandering_engine::{
         WindowManagerTrait, WindowTrait,
     },
 };
-use logic::{create_plant, create_plant_data};
-use rand::SeedableRng;
+use logic::create_plant;
+use rand::{rngs::ThreadRng, Rng};
 use setup::{create_camera, create_objects, create_shaders, create_textures};
-
-pub type Rng = rand_chacha::ChaCha20Rng;
+use sysinfo::{CpuRefreshKind, RefreshKind, System};
 
 use crate::{
     color_obj::AgeObject, cylinder, l_system::config::LConfig, render_data::RenderDataBindGroup,
@@ -52,7 +51,14 @@ pub struct Application {
 
     render_data: BindGroupHandle<RenderDataBindGroup>,
 
-    rng: Rng,
+    rng: ThreadRng,
+
+    system: sysinfo::System,
+
+    cpu_usage_accum: f32,
+    n_cpu_usage_samples: u32,
+    target_interpolation: f32,
+    cpu_refresh_timer: f32,
 }
 
 const N_DUST: u32 = 60;
@@ -90,11 +96,19 @@ impl Application {
             (main_window_handle, input_window_handle)
         };
         let renderer = &mut engine.renderer;
-        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(123);
+
         let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer).await;
 
-        let (depth_texture, multisample_texture, noise_image, noise_texture, lut_texture, lut_texture_linear) =
-            create_textures(renderer);
+        let (
+            depth_texture,
+            multisample_texture,
+            noise_image,
+            noise_texture,
+            lut_texture,
+            lut_texture_linear,
+        ) = create_textures(renderer);
+
+        let mut rng = rand::thread_rng();
 
         let (floor, dust, grass) = create_objects(renderer, &mut rng, &noise_image);
 
@@ -103,11 +117,16 @@ impl Application {
         ))
         .unwrap();
         let mut l_config = LConfig::from_json(l_config_json).unwrap();
+        l_config.rules.iterations = 0;
+        let plant = create_plant(renderer, &l_config);
         l_config.rules.iterations = 10;
-        let plant = create_plant(renderer, &l_config, &mut rng);
 
         let render_data = RenderDataBindGroup::new(renderer);
         let render_data = renderer.create_typed_bind_group(render_data);
+
+        let system = System::new_with_specifics(
+            RefreshKind::new().with_cpu(CpuRefreshKind::new().with_cpu_usage()),
+        );
 
         Self {
             main_window_handle,
@@ -137,10 +156,17 @@ impl Application {
             render_data,
 
             rng,
+
+            system,
+
+            cpu_usage_accum: 0.0,
+            n_cpu_usage_samples: 0,
+            cpu_refresh_timer: 0.0,
+            target_interpolation: 0.0,
         }
     }
 
-    fn update_main_window(&mut self, context: &mut EngineContext) {
+    fn update_main_window(&mut self, context: &mut EngineContext, dt: f32) {
         let window = context
             .window_manager
             .get_window(self.main_window_handle)
@@ -189,47 +215,68 @@ impl Application {
             .renderer
             .get_typed_bind_group_mut(self.render_data)
             .unwrap();
+
         render_data.data.time = self.time;
         render_data.data.wind_strength = 0.002 + (self.time * 0.2).sin().powf(4.0).max(0.0) * 0.01;
+
+        self.system.refresh_cpu();
+        for cpu in self.system.cpus() {
+            self.cpu_usage_accum += cpu.cpu_usage();
+            self.n_cpu_usage_samples += 1;
+        }
+
+        self.cpu_refresh_timer -= dt;
+        if self.cpu_refresh_timer < 0.0 {
+            self.cpu_refresh_timer = 2.0;
+
+            let avg_cpu = self.cpu_usage_accum / self.n_cpu_usage_samples as f32;
+            self.target_interpolation = (avg_cpu / 100.0).clamp(0.0, 1.0);
+            self.target_interpolation = self.target_interpolation * 0.75 + 0.125;
+            self.cpu_usage_accum = 0.0;
+            self.n_cpu_usage_samples = 0;
+            // self.target_interpolation = self.cpu_usage_accum
+        }
+
+        self.l_config.interpolation +=
+            (self.target_interpolation - self.l_config.interpolation) * (1.0 - (-0.1 * dt).exp());
+        self.l_config.reseed(self.l_config.seed);
+        self.plant = create_plant(context.renderer, &self.l_config);
     }
 
-    fn update_input_window(&mut self, context: &mut EngineContext) {
+    fn update_input_window(&mut self, context: &mut EngineContext, dt: f32) {
         let camera = context
             .renderer
             .get_typed_bind_group_mut(self.camera)
             .unwrap();
 
-        let input_window_position = {
-            let (width, height) = context
-                .window_manager
-                .get_window(self.main_window_handle)
-                .unwrap()
-                .size();
-
-            let bottom_vertex = self.plant.vertices.first().unwrap();
-            let camera_matrix = camera.matrix();
-
-            let clip_pos = camera_matrix * Vec3::from(bottom_vertex.position).extend(1.0);
-            let mut normalized_pos = Vec2::new(clip_pos.x, clip_pos.y) * 0.5 + 0.5;
-            normalized_pos.y = 1.0 - normalized_pos.y;
-            let pixel_pos = normalized_pos * Vec2::new(width as f32, height as f32);
-            pixel_pos.round()
-        };
+        let main_window_size = context
+            .window_manager
+            .get_window(self.main_window_handle)
+            .unwrap()
+            .size();
 
         let window = context
             .window_manager
             .get_window(self.input_window_handle)
             .unwrap();
-        
-        window.set_absolute_position(
-            input_window_position.x as i32 - window.width() as i32 / 2,
-            input_window_position.y as i32 - window.height() as i32,
-        );
 
-        let current_time = std::time::Instant::now();
-        let dt = (current_time - self.last_time).as_secs_f32();
-        self.last_time = current_time;
-        self.time += dt;
+        if let Some(bottom_vertex) = self.plant.vertices.first() {
+            let input_window_position = {
+                let camera_matrix = camera.matrix();
+
+                let clip_pos = camera_matrix * Vec3::from(bottom_vertex.position).extend(1.0);
+                let mut normalized_pos = Vec2::new(clip_pos.x, clip_pos.y) * 0.5 + 0.5;
+                normalized_pos.y = 1.0 - normalized_pos.y;
+                let pixel_pos = normalized_pos
+                    * Vec2::new(main_window_size.0 as f32, main_window_size.1 as f32);
+                pixel_pos.round()
+            };
+
+            window.set_absolute_position(
+                input_window_position.x as i32 - window.width() as i32 / 2,
+                input_window_position.y as i32 - window.height() as i32,
+            );
+        }
 
         camera.update(window.events(), dt);
 
@@ -252,7 +299,8 @@ impl Application {
 
         if old_size.max_element() < 0.865 {
             let instance = *instance;
-            self.plant = create_plant(context.renderer, &self.l_config, &mut rand::thread_rng());
+            self.l_config.randomize_rule_sets(Some(2));
+            self.l_config.reseed(rand::thread_rng().gen::<u64>());
             *self.plant.instances.first_mut().unwrap() = instance;
         } else {
             self.plant.update(context.renderer);
@@ -321,8 +369,8 @@ impl EventHandler for Application {
             TextureDescriptor {
                 size: resolution.into(),
                 format: TextureFormat::Depth32F,
-                    sample_count: 4,
-                    ..Default::default()
+                sample_count: 4,
+                ..Default::default()
             },
             self.depth_texture,
         );
@@ -342,8 +390,13 @@ impl EventHandler for Application {
     }
 
     fn on_update(&mut self, context: &mut EngineContext) {
-        self.update_main_window(context);
-        self.update_input_window(context);
+        let current_time = std::time::Instant::now();
+        let dt = (current_time - self.last_time).as_secs_f32();
+        self.last_time = current_time;
+        self.time += dt;
+
+        self.update_main_window(context, dt);
+        self.update_input_window(context, dt);
     }
 
     fn on_render(&mut self, renderer: &mut Renderer, _: WindowHandle, _: &mut WindowManager) {
@@ -369,7 +422,7 @@ impl EventHandler for Application {
             .render(&[&self.dust])
             .bind(3, self.lut_texture_linear.into())
             .set_shader(self.grass_shader)
-            // .render(&[&self.grass])
+            .render(&[&self.grass])
             .submit();
 
         renderer

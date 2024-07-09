@@ -1,3 +1,4 @@
+use is_none_or::IsNoneOr;
 use jandering_engine::{
     bind_group::{camera::free::MatrixCameraBindGroup, texture::TextureBindGroup, BindGroup},
     engine::{Engine, EngineContext},
@@ -55,10 +56,8 @@ pub struct Application {
 
     system: sysinfo::System,
 
-    cpu_usage_accum: f32,
-    n_cpu_usage_samples: u32,
-    target_interpolation: f32,
-    cpu_refresh_timer: f32,
+    cpu_usage_queue: Vec<(std::time::Instant, f32)>,
+    cpu_sample_timer: f32,
 }
 
 const N_DUST: u32 = 60;
@@ -90,7 +89,8 @@ impl Application {
                     .with_title("temp")
                     .with_cursor(true)
                     .with_decorations(false)
-                    .with_transparency(true),
+                    .with_transparency(true)
+                    .with_fps_preference(FpsPreference::Exact(30)),
             );
 
             (main_window_handle, input_window_handle)
@@ -159,10 +159,8 @@ impl Application {
 
             system,
 
-            cpu_usage_accum: 0.0,
-            n_cpu_usage_samples: 0,
-            cpu_refresh_timer: 0.0,
-            target_interpolation: 0.0,
+            cpu_usage_queue: Vec::new(),
+            cpu_sample_timer: 0.0,
         }
     }
 
@@ -221,25 +219,31 @@ impl Application {
 
         self.system.refresh_cpu();
         for cpu in self.system.cpus() {
-            self.cpu_usage_accum += cpu.cpu_usage();
-            self.n_cpu_usage_samples += 1;
+            self.cpu_usage_queue
+                .push((std::time::Instant::now(), cpu.cpu_usage()));
         }
 
-        self.cpu_refresh_timer -= dt;
-        if self.cpu_refresh_timer < 0.0 {
-            self.cpu_refresh_timer = 2.0;
-
-            let avg_cpu = self.cpu_usage_accum / self.n_cpu_usage_samples as f32;
-            self.target_interpolation = (avg_cpu / 100.0).clamp(0.0, 1.0);
-            self.target_interpolation = self.target_interpolation * 0.75 + 0.125;
-            self.cpu_usage_accum = 0.0;
-            self.n_cpu_usage_samples = 0;
-            // self.target_interpolation = self.cpu_usage_accum
+        let current_time = std::time::Instant::now();
+        self.cpu_sample_timer -= dt;
+        if self.cpu_sample_timer < 0.0 {
+            self.cpu_sample_timer = 0.1;
+            self.cpu_usage_queue.retain(|(start_time, _)| {
+                current_time
+                    .checked_duration_since(*start_time)
+                    .is_none_or(|time| time.as_secs_f32() < 5.0)
+            });
         }
 
+        let average = self
+            .cpu_usage_queue
+            .iter()
+            .fold(0.0, |acc, (_, value)| acc + *value)
+            / self.cpu_usage_queue.len() as f32;
+        let normalized_average = average / 100.0;
         self.l_config.interpolation +=
-            (self.target_interpolation - self.l_config.interpolation) * (1.0 - (-0.1 * dt).exp());
+            (normalized_average - self.l_config.interpolation) * (1.0 - (-0.3 * dt).exp());
         self.l_config.reseed(self.l_config.seed);
+
         self.plant = create_plant(context.renderer, &self.l_config);
     }
 

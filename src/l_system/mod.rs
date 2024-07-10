@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
 use jandering_engine::types::{Qua, Vec3};
-use rand::SeedableRng;
 use serde::Deserialize;
 
 use self::config::{LConfig, LSymbol};
 
-pub mod colors;
 pub mod config;
 
 type LRng = rand_chacha::ChaCha20Rng;

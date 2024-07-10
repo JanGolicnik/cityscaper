@@ -1,3 +1,4 @@
+use color::{ColorLut, ColorValue};
 use is_none_or::IsNoneOr;
 use jandering_engine::{
     bind_group::{camera::free::MatrixCameraBindGroup, texture::TextureBindGroup, BindGroup},
@@ -5,7 +6,7 @@ use jandering_engine::{
     event_handler::EventHandler,
     object::{Instance, Object},
     render_pass::RenderPassTrait,
-    renderer::{BindGroupHandle, Janderer, Renderer, ShaderHandle, TextureHandle},
+    renderer::{BindGroupHandle, Janderer, Renderer, SamplerHandle, ShaderHandle, TextureHandle},
     texture::{TextureDescriptor, TextureFormat},
     types::{Vec2, Vec3},
     utils::load_text,
@@ -16,7 +17,7 @@ use jandering_engine::{
 };
 use logic::create_plant;
 use rand::{rngs::ThreadRng, Rng};
-use setup::{create_camera, create_objects, create_shaders, create_textures};
+use setup::{create_camera, create_objects, create_shaders, create_textures, re_create_lut_textures};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::{
@@ -25,6 +26,8 @@ use crate::{
 
 pub mod logic;
 pub mod setup;
+pub mod color;
+
 pub struct Application {
     last_time: std::time::Instant,
 
@@ -49,12 +52,14 @@ pub struct Application {
 
     lut_texture: BindGroupHandle<TextureBindGroup>,
     lut_texture_linear: BindGroupHandle<TextureBindGroup>,
+    lut_sampler: SamplerHandle,
 
     render_data: BindGroupHandle<RenderDataBindGroup>,
 
     rng: ThreadRng,
 
     system: sysinfo::System,
+    machine: machine_info::Machine,
 
     plant_size: f32,
 
@@ -63,6 +68,11 @@ pub struct Application {
 
     ram_samples: Vec<(std::time::Instant, f32)>,
     ram_sample_timer: f32,
+
+    gpu_samples: Vec<(std::time::Instant, f32)>,
+    gpu_sample_timer: f32,
+
+    color_lut: ColorLut
 }
 
 const N_DUST: u32 = 60;
@@ -104,14 +114,22 @@ impl Application {
 
         let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer).await;
 
+
+        let lut_json = pollster::block_on(load_text(jandering_engine::utils::FilePath::FileName(
+            "lut.json",
+        )))
+        .unwrap();
+        let color_lut = ColorLut::new(&lut_json);
+
         let (
             depth_texture,
             multisample_texture,
             noise_image,
             noise_texture,
+            lut_sampler,
             lut_texture,
             lut_texture_linear,
-        ) = create_textures(renderer);
+        ) = create_textures(renderer, &color_lut);
 
         let mut rng = rand::thread_rng();
 
@@ -135,6 +153,8 @@ impl Application {
                 .with_memory(MemoryRefreshKind::new().with_ram()),
         );
 
+        let machine = machine_info::Machine::new();
+
         Self {
             main_window_handle,
             input_window_handle,
@@ -157,6 +177,7 @@ impl Application {
             grass,
             noise_texture,
 
+            lut_sampler,
             lut_texture,
             lut_texture_linear,
 
@@ -165,6 +186,7 @@ impl Application {
             rng,
 
             system,
+            machine,
 
             plant_size: 1.0,
 
@@ -173,20 +195,55 @@ impl Application {
 
             ram_samples: Vec::new(),
             ram_sample_timer: 0.0,
+
+            gpu_samples: Vec::new(),
+            gpu_sample_timer: 0.0,
+
+
+            color_lut
         }
     }
 
+    fn get_average_gpu(&mut self, dt: f32) -> f32 {
+        self.gpu_sample_timer -= dt;
+        if self.gpu_sample_timer < 0.0 {
+            for gpu in self.machine.graphics_status(){
+                self.gpu_samples.push((
+                    std::time::Instant::now(),
+                    gpu.gpu as f32 / 100.0,
+                ));
+            }
+            self.gpu_sample_timer = 1.5;
+        }
+
+        let current_time = std::time::Instant::now();
+        self.gpu_samples
+            .retain(|(start_time, _)| current_time.duration_since(*start_time).as_secs_f32() < 15.0);
+
+        if self.gpu_samples.is_empty() {
+            return 1.0;
+        }
+
+        self.gpu_samples
+            .iter()
+            .fold(0.0, |acc, (_, value)| acc + *value)
+            / self.gpu_samples.len() as f32
+    }
+
     fn get_average_ram(&mut self, dt: f32) -> f32 {
-        self.system.refresh_memory();
 
         self.ram_sample_timer -= dt;
         if self.ram_sample_timer < 0.0 {
+            self.system.refresh_memory();
+            
             let current_memory = self.system.used_memory();
             let max_memory = self.system.total_memory();
+            
             self.ram_samples.push((
                 std::time::Instant::now(),
                 current_memory as f32 / max_memory as f32,
             ));
+            
             self.ram_sample_timer = 0.1;
         }
 
@@ -203,23 +260,26 @@ impl Application {
             .fold(0.0, |acc, (_, value)| acc + *value)
             / self.ram_samples.len() as f32
     }
+
     fn get_average_cpu(&mut self, dt: f32) -> f32 {
-        self.system.refresh_cpu();
-        for cpu in self.system.cpus() {
-            self.cpu_samples
-                .push((std::time::Instant::now(), cpu.cpu_usage()));
+        self.cpu_sample_timer -= dt;
+
+        if self.cpu_sample_timer < 0.0 {
+            self.system.refresh_cpu();
+            for cpu in self.system.cpus() {
+                self.cpu_samples
+                    .push((std::time::Instant::now(), cpu.cpu_usage()));
+            }
+
+            self.cpu_sample_timer = 0.1;
         }
 
         let current_time = std::time::Instant::now();
-        self.cpu_sample_timer -= dt;
-        if self.cpu_sample_timer < 0.0 {
-            self.cpu_sample_timer = 0.1;
-            self.cpu_samples.retain(|(start_time, _)| {
-                current_time
-                    .checked_duration_since(*start_time)
-                    .is_none_or(|time| time.as_secs_f32() < 5.0)
-            });
-        }
+        self.cpu_samples.retain(|(start_time, _)| {
+            current_time
+                .checked_duration_since(*start_time)
+                .is_none_or(|time| time.as_secs_f32() < 5.0)
+        });
 
         let average = self
             .cpu_samples
@@ -288,6 +348,15 @@ impl Application {
 
         let average_ram = self.get_average_ram(dt);
         self.l_config.rendering.width_mod = Some(average_ram + 0.5);
+
+        let average_gpu = self.get_average_gpu(dt);
+        for color in self.color_lut.colors.iter_mut(){
+            if let ColorValue::HSL{value} = &mut color.color{
+                value[0] += average_gpu * dt * 5.0;
+            }
+        }
+
+        re_create_lut_textures(context.renderer, &self.color_lut, self.lut_texture, self.lut_texture_linear, self.lut_sampler);
 
         self.l_config.reseed(self.l_config.seed);
 

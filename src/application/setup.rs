@@ -20,9 +20,7 @@ use crate::{
 };
 
 use super::{
-    logic::{parse_lut, place_pos_on_heightmap},
-    RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT, ORTHO_NEAR, ORTHO_WIDTH,
-    REFERENCE_DIAGONAL,
+    color::ColorLut, logic::place_pos_on_heightmap, RenderDataBindGroup, N_DUST, N_GRASS, ORTHO_FAR, ORTHO_HEIGHT, ORTHO_NEAR, ORTHO_WIDTH, REFERENCE_DIAGONAL
 };
 const GRASS_RANGE: f32 = 2.75;
 const GRASS_ITERATIONS: u32 = 12;
@@ -103,15 +101,17 @@ pub fn create_objects(
 
 pub fn create_textures(
     renderer: &mut Renderer,
+    color_lut: &ColorLut
 ) -> (
     TextureHandle,
     TextureHandle,
     Image,
     BindGroupHandle<TextureBindGroup>,
+    SamplerHandle,
     BindGroupHandle<TextureBindGroup>,
     BindGroupHandle<TextureBindGroup>,
 ) {
-    let (lut_texture, lut_texture_linear) = create_lut_textures(renderer, None, None, None);
+    let (lut_sampler, lut_texture, lut_texture_linear) = create_lut_textures(renderer, color_lut);
     let depth_texture = renderer.create_texture(TextureDescriptor {
         size: (100, 100).into(),
         format: TextureFormat::Depth32F,
@@ -145,6 +145,7 @@ pub fn create_textures(
         multisample_texture,
         noise_image,
         noise_texture,
+        lut_sampler,
         lut_texture,
         lut_texture_linear,
     )
@@ -188,39 +189,76 @@ pub async fn create_shaders(
     (shader, floor_shader, grass_shader, dust_shader)
 }
 
+pub fn re_create_lut_textures(
+    renderer: &mut Renderer,
+    color_lut: &ColorLut,
+    lut_handle: BindGroupHandle<TextureBindGroup>,
+    lut_handle_linear: BindGroupHandle<TextureBindGroup>,
+    lut_sampler: SamplerHandle,
+) {
+    // non linear
+    {
+        let data = color_lut.to_rgb();
+
+        let desc = TextureDescriptor {
+            data: if data.is_empty() { None } else { Some(&data) },
+            size: UVec2 {
+                x: (data.len() as u32 / 4).max(1),
+                y: 1,
+            },
+            format: TextureFormat::Rgba8U,
+            ..Default::default()
+        };
+
+        let texture_handle = renderer
+            .get_typed_bind_group(lut_handle)
+            .unwrap()
+            .texture_handle;
+        renderer.re_create_texture(desc.clone(), texture_handle);
+        let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler);
+
+        renderer.create_typed_bind_group_at(texture, lut_handle);
+    }
+
+    // linear
+    {
+        let data = color_lut.to_rgb_linear();
+
+        let desc = TextureDescriptor {
+            data: if data.is_empty() { None } else { Some(&data) },
+            size: UVec2 {
+                x: (data.len() as u32 / 4).max(1),
+                y: 1,
+            },
+            format: TextureFormat::Rgba8U,
+            ..Default::default()
+        };
+
+        let texture_handle = renderer
+            .get_typed_bind_group(lut_handle_linear)
+            .unwrap()
+            .texture_handle;
+        renderer.re_create_texture(desc.clone(), texture_handle);
+        let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler);
+
+        renderer.create_typed_bind_group_at(texture, lut_handle_linear);
+    }
+}
+
 pub fn create_lut_textures(
     renderer: &mut Renderer,
-    lut_handle: Option<BindGroupHandle<TextureBindGroup>>,
-    lut_handle_linear: Option<BindGroupHandle<TextureBindGroup>>,
-    mut lut_sampler: Option<SamplerHandle>,
+    color_lut: &ColorLut,
 ) -> (
+    SamplerHandle,
     BindGroupHandle<TextureBindGroup>,
     BindGroupHandle<TextureBindGroup>,
 ) {
-    if lut_sampler.is_none() {
-        lut_sampler = Some(renderer.create_sampler(SamplerDescriptor {
-            address_mode: jandering_engine::texture::sampler::SamplerAddressMode::Clamp,
-            ..Default::default()
-        }));
-    }
+    let sampler = renderer.create_sampler(SamplerDescriptor {
+        address_mode: jandering_engine::texture::sampler::SamplerAddressMode::Clamp,
+        ..Default::default()
+    });
 
-    let lut_json = pollster::block_on(load_text(jandering_engine::utils::FilePath::FileName(
-        "lut.json",
-    )))
-    .unwrap();
-
-    let data = parse_lut(&lut_json, false)
-        .unwrap_or_default()
-        .iter()
-        .flat_map(|e| {
-            [
-                (e.x * 255.0) as u8,
-                (e.y * 255.0) as u8,
-                (e.z * 255.0) as u8,
-                255,
-            ]
-        })
-        .collect::<Vec<_>>();
+    let data = color_lut.to_rgb();
     let mut desc = TextureDescriptor {
         data: if data.is_empty() { None } else { Some(&data) },
         size: UVec2 {
@@ -231,53 +269,22 @@ pub fn create_lut_textures(
         ..Default::default()
     };
 
-    let lut_texture = if let Some(handle) = lut_handle {
-        let texture_handle = renderer
-            .get_typed_bind_group(handle)
-            .unwrap()
-            .texture_handle;
-        renderer.re_create_texture(desc.clone(), texture_handle);
-        let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler.unwrap());
-
-        renderer.create_typed_bind_group_at(texture, handle);
-        handle
-    } else {
+    let lut_texture = {
         let handle = renderer.create_texture(desc.clone());
-        let texture = TextureBindGroup::new(renderer, handle, lut_sampler.unwrap());
+        let texture = TextureBindGroup::new(renderer, handle, sampler);
         renderer.create_typed_bind_group(texture)
     };
 
-    let data = parse_lut(&lut_json, true)
-        .unwrap_or_default()
-        .iter()
-        .flat_map(|e| {
-            [
-                (e.x * 255.0) as u8,
-                (e.y * 255.0) as u8,
-                (e.z * 255.0) as u8,
-                255,
-            ]
-        })
-        .collect::<Vec<_>>();
+    let data = color_lut.to_rgb_linear();
 
     desc.data = if data.is_empty() { None } else { Some(&data) };
     desc.size.x = (data.len() as u32 / 4).max(1);
 
-    let lut_texture_linear = if let Some(handle) = lut_handle_linear {
-        let texture_handle = renderer
-            .get_typed_bind_group(handle)
-            .unwrap()
-            .texture_handle;
-        renderer.re_create_texture(desc, texture_handle);
-        let texture = TextureBindGroup::new(renderer, texture_handle, lut_sampler.unwrap());
-
-        renderer.create_typed_bind_group_at(texture, handle);
-        handle
-    } else {
+    let lut_texture_linear = {
         let handle = renderer.create_texture(desc);
-        let texture = TextureBindGroup::new(renderer, handle, lut_sampler.unwrap());
+        let texture = TextureBindGroup::new(renderer, handle, sampler);
         renderer.create_typed_bind_group(texture)
     };
 
-    (lut_texture, lut_texture_linear)
+    (sampler, lut_texture, lut_texture_linear)
 }

@@ -18,7 +18,9 @@ hex_color = "3.0.0"
 lazy_static = "1.4.0"
 raw-window-handle = "0.5"
 rand_chacha = "0.3.1"
-sysinfo = "0.30.12"
+colors-transform = "0.2.11"
+machine-info = "1.0.9"
+sysinfo = "0.30.13"
 
 [dependencies.windows]
 version = "0.57"

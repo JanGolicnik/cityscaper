@@ -4,7 +4,6 @@ use jandering_engine::{
     types::{Mat4, Qua, Vec2, Vec3},
 };
 use rand::{rngs::ThreadRng, Rng};
-use serde::Deserialize;
 
 use crate::{
     color_obj::{AgeObject, AgeVertex},
@@ -224,24 +223,4 @@ pub fn shapes_to_mesh_data(shapes: Vec<RenderShape>) -> Option<(Vec<AgeVertex>, 
     }
 
     Some((vertices, indices))
-}
-
-pub fn parse_lut(text: &str, linear: bool) -> Option<Vec<Vec3>> {
-    #[derive(Deserialize)]
-    struct Element {
-        color: [f32; 3],
-        age: u32,
-    }
-    let colors = serde_json::from_str::<Vec<Element>>(text)
-        .unwrap()
-        .into_iter()
-        .map(|e| (e.age, e.color.into()))
-        .collect::<Vec<(u32, Vec3)>>();
-    let colors = if linear {
-        l_system::colors::parse_colors_linear(&colors)
-    } else {
-        l_system::colors::parse_colors(&colors)
-    };
-
-    Some(colors)
 }

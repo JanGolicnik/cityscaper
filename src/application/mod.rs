@@ -17,16 +17,19 @@ use jandering_engine::{
 };
 use logic::create_plant;
 use rand::{rngs::ThreadRng, Rng};
-use setup::{create_camera, create_objects, create_shaders, create_textures, re_create_lut_textures};
+use setup::{
+    create_camera, create_objects, create_shaders, create_textures, re_create_lut_textures,
+};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::{
-    color_obj::AgeObject, cylinder, l_system::config::LConfig, render_data::RenderDataBindGroup,
+    color_obj::AgeObject, cylinder, l_system::config::LConfig, main,
+    render_data::RenderDataBindGroup,
 };
 
+pub mod color;
 pub mod logic;
 pub mod setup;
-pub mod color;
 
 pub struct Application {
     last_time: std::time::Instant,
@@ -72,7 +75,9 @@ pub struct Application {
     gpu_samples: Vec<(std::time::Instant, f32)>,
     gpu_sample_timer: f32,
 
-    color_lut: ColorLut
+    plant_interpolation: f32,
+
+    color_lut: ColorLut,
 }
 
 const N_DUST: u32 = 60;
@@ -114,7 +119,6 @@ impl Application {
 
         let (shader, floor_shader, grass_shader, dust_shader) = create_shaders(renderer).await;
 
-
         let lut_json = pollster::block_on(load_text(jandering_engine::utils::FilePath::FileName(
             "lut.json",
         )))
@@ -154,6 +158,8 @@ impl Application {
         );
 
         let machine = machine_info::Machine::new();
+
+        let plant_interpolation = l_config.interpolation;
 
         Self {
             main_window_handle,
@@ -199,26 +205,26 @@ impl Application {
             gpu_samples: Vec::new(),
             gpu_sample_timer: 0.0,
 
+            plant_interpolation,
 
-            color_lut
+            color_lut,
         }
     }
 
     fn get_average_gpu(&mut self, dt: f32) -> f32 {
         self.gpu_sample_timer -= dt;
         if self.gpu_sample_timer < 0.0 {
-            for gpu in self.machine.graphics_status(){
-                self.gpu_samples.push((
-                    std::time::Instant::now(),
-                    gpu.gpu as f32 / 100.0,
-                ));
+            for gpu in self.machine.graphics_status() {
+                self.gpu_samples
+                    .push((std::time::Instant::now(), gpu.gpu as f32 / 100.0));
             }
             self.gpu_sample_timer = 1.5;
         }
 
         let current_time = std::time::Instant::now();
-        self.gpu_samples
-            .retain(|(start_time, _)| current_time.duration_since(*start_time).as_secs_f32() < 15.0);
+        self.gpu_samples.retain(|(start_time, _)| {
+            current_time.duration_since(*start_time).as_secs_f32() < 15.0
+        });
 
         if self.gpu_samples.is_empty() {
             return 1.0;
@@ -231,19 +237,18 @@ impl Application {
     }
 
     fn get_average_ram(&mut self, dt: f32) -> f32 {
-
         self.ram_sample_timer -= dt;
         if self.ram_sample_timer < 0.0 {
             self.system.refresh_memory();
-            
+
             let current_memory = self.system.used_memory();
             let max_memory = self.system.total_memory();
-            
+
             self.ram_samples.push((
                 std::time::Instant::now(),
                 current_memory as f32 / max_memory as f32,
             ));
-            
+
             self.ram_sample_timer = 0.1;
         }
 
@@ -343,24 +348,36 @@ impl Application {
         render_data.data.wind_strength = 0.002 + (self.time * 0.2).sin().powf(4.0).max(0.0) * 0.01;
 
         let average_cpu = self.get_average_cpu(dt);
-        self.l_config.interpolation +=
-            (average_cpu - self.l_config.interpolation) * (1.0 - (-0.3 * dt).exp());
+        let target_interpolation = average_cpu * 0.5 + 0.5;
+        self.plant_interpolation +=
+            (target_interpolation - self.plant_interpolation) * (1.0 - (-0.3 * dt).exp());
 
         let average_ram = self.get_average_ram(dt);
-        self.l_config.rendering.width_mod = Some(average_ram + 0.5);
+        let width_mod = average_ram + 0.5;
 
         let average_gpu = self.get_average_gpu(dt);
-        for color in self.color_lut.colors.iter_mut(){
-            if let ColorValue::HSL{value} = &mut color.color{
-                value[0] += average_gpu * dt * 5.0;
+        for color in self.color_lut.colors.iter_mut() {
+            if let ColorValue::HSL { value } = &mut color.color {
+                value[0] = (value[0] + average_gpu * dt * 30.0) % 360.0;
             }
         }
 
-        re_create_lut_textures(context.renderer, &self.color_lut, self.lut_texture, self.lut_texture_linear, self.lut_sampler);
+        re_create_lut_textures(
+            context.renderer,
+            &self.color_lut,
+            self.lut_texture,
+            self.lut_texture_linear,
+            self.lut_sampler,
+        );
 
-        self.l_config.reseed(self.l_config.seed);
-
-        self.plant = create_plant(context.renderer, &self.l_config);
+        if (self.plant_interpolation - self.l_config.interpolation).abs() > 0.001
+            || (width_mod - self.l_config.rendering.width_mod.unwrap_or(0.0)).abs() > 0.001
+        {
+            self.l_config.interpolation = self.plant_interpolation;
+            self.l_config.rendering.width_mod = Some(width_mod);
+            self.l_config.reseed(self.l_config.seed);
+            self.plant = create_plant(context.renderer, &self.l_config);
+        }
     }
 
     fn update_input_window(&mut self, context: &mut EngineContext, dt: f32) {
@@ -374,6 +391,12 @@ impl Application {
             .get_window(self.main_window_handle)
             .unwrap()
             .size();
+
+        let main_window_position = context
+            .window_manager
+            .get_window(self.main_window_handle)
+            .unwrap()
+            .position();
 
         let window = context
             .window_manager
@@ -393,8 +416,8 @@ impl Application {
             };
 
             window.set_absolute_position(
-                input_window_position.x as i32 - window.width() as i32 / 2,
-                input_window_position.y as i32 - window.height() as i32,
+                input_window_position.x as i32 - window.width() as i32 / 2 - main_window_position.0,
+                input_window_position.y as i32 - window.height() as i32 - main_window_position.1,
             );
         }
 

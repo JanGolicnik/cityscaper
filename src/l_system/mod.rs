@@ -106,7 +106,19 @@ fn build_symbols(
             let k = std::f32::consts::E.powf(-2.0 * t);
             (1.0 - k) / (1.0 + k)
         };
-        t * 0.5 + 0.5
+
+        // ( 1 / ( 1 + e^(-3.4 * (x * 2.8 - 1.4)) ) )
+        // let t = {
+        //     let exp = std::f32::consts::E.powf(-3.4 * (t * 2.8 - 1.4));
+        //     1.0 / (1.0 + exp)
+        // };
+
+        let t = t.powf(((iteration as f32 - lerp_age) / 3.5).max(1.0));
+
+        // t * 0.5 + 0.5
+        // let k = 1.0 / (iteration + 1) as f32;
+        // t * (1.0 - k) + k
+        t
     };
 
     let symbol_to_axis = |symbol: &LSymbol| match &symbol {
@@ -161,7 +173,7 @@ fn build_symbols(
                 states.last_mut().unwrap().scale *= values.get(1.0, &mut config.rng.borrow_mut());
             }
             LSymbol::Rule(id) => {
-                if age >= 1.0 || len_mod < 0.1 {
+                if age >= 1.0 || len_mod < 0.001 {
                     continue;
                 }
 

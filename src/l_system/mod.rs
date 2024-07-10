@@ -22,6 +22,9 @@ enum Shape {
 pub struct RenderConfig {
     default_angle_change: f32,
     shapes: HashMap<char, Shape>,
+
+    #[serde(default)]
+    pub width_mod: Option<f32>,
 }
 
 #[derive(Debug)]
@@ -99,7 +102,13 @@ fn build_symbols(
     let len_mod = {
         let lerp_age = config.interpolation * config.rules.iterations as f32;
         let t = lerp_age / (iteration + 1) as f32;
-        t.min(1.0)
+
+        // ( 1 - e^(-2x) ) / ( 1 + e^(-2x) )
+        let t = {
+            let k = std::f32::consts::E.powf(-2.0 * t);
+            (1.0 - k) / (1.0 + k)
+        };
+        t * 0.5 + 0.5
     };
 
     let symbol_to_axis = |symbol: &LSymbol| match &symbol {
@@ -183,10 +192,13 @@ fn get_shape(
                         .mul_vec3(Vec3::new(0.0, length * state.scale, 0.0));
                 let start = state.position;
                 state.position = end;
+
+                let width = *width * render_config.width_mod.unwrap_or(1.0);
+
                 RenderShape::Line {
                     start,
                     end,
-                    width: *width,
+                    width,
                     age,
                     last_age: state.age,
                 }
@@ -204,10 +216,13 @@ fn get_shape(
                         .mul_vec3(Vec3::new(0.0, length * state.scale, 0.0));
                 let start = state.position;
                 state.position = end;
+
+                let width = *width * render_config.width_mod.unwrap_or(1.0);
+
                 RenderShape::Line {
                     start,
                     end,
-                    width: *width,
+                    width,
                     age,
                     last_age: state.age,
                 }

@@ -17,7 +17,7 @@ use jandering_engine::{
 use logic::create_plant;
 use rand::{rngs::ThreadRng, Rng};
 use setup::{create_camera, create_objects, create_shaders, create_textures};
-use sysinfo::{CpuRefreshKind, RefreshKind, System};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::{
     color_obj::AgeObject, cylinder, l_system::config::LConfig, render_data::RenderDataBindGroup,
@@ -56,8 +56,13 @@ pub struct Application {
 
     system: sysinfo::System,
 
-    cpu_usage_queue: Vec<(std::time::Instant, f32)>,
+    plant_size: f32,
+
+    cpu_samples: Vec<(std::time::Instant, f32)>,
     cpu_sample_timer: f32,
+
+    ram_samples: Vec<(std::time::Instant, f32)>,
+    ram_sample_timer: f32,
 }
 
 const N_DUST: u32 = 60;
@@ -125,7 +130,9 @@ impl Application {
         let render_data = renderer.create_typed_bind_group(render_data);
 
         let system = System::new_with_specifics(
-            RefreshKind::new().with_cpu(CpuRefreshKind::new().with_cpu_usage()),
+            RefreshKind::new()
+                .with_cpu(CpuRefreshKind::new().with_cpu_usage())
+                .with_memory(MemoryRefreshKind::new().with_ram()),
         );
 
         Self {
@@ -159,9 +166,67 @@ impl Application {
 
             system,
 
-            cpu_usage_queue: Vec::new(),
+            plant_size: 1.0,
+
+            cpu_samples: Vec::new(),
             cpu_sample_timer: 0.0,
+
+            ram_samples: Vec::new(),
+            ram_sample_timer: 0.0,
         }
+    }
+
+    fn get_average_ram(&mut self, dt: f32) -> f32 {
+        self.system.refresh_memory();
+
+        self.ram_sample_timer -= dt;
+        if self.ram_sample_timer < 0.0 {
+            let current_memory = self.system.used_memory();
+            let max_memory = self.system.total_memory();
+            self.ram_samples.push((
+                std::time::Instant::now(),
+                current_memory as f32 / max_memory as f32,
+            ));
+            self.ram_sample_timer = 0.1;
+        }
+
+        let current_time = std::time::Instant::now();
+        self.ram_samples
+            .retain(|(start_time, _)| current_time.duration_since(*start_time).as_secs_f32() < 5.0);
+
+        if self.ram_samples.is_empty() {
+            return 1.0;
+        }
+
+        self.ram_samples
+            .iter()
+            .fold(0.0, |acc, (_, value)| acc + *value)
+            / self.ram_samples.len() as f32
+    }
+    fn get_average_cpu(&mut self, dt: f32) -> f32 {
+        self.system.refresh_cpu();
+        for cpu in self.system.cpus() {
+            self.cpu_samples
+                .push((std::time::Instant::now(), cpu.cpu_usage()));
+        }
+
+        let current_time = std::time::Instant::now();
+        self.cpu_sample_timer -= dt;
+        if self.cpu_sample_timer < 0.0 {
+            self.cpu_sample_timer = 0.1;
+            self.cpu_samples.retain(|(start_time, _)| {
+                current_time
+                    .checked_duration_since(*start_time)
+                    .is_none_or(|time| time.as_secs_f32() < 5.0)
+            });
+        }
+
+        let average = self
+            .cpu_samples
+            .iter()
+            .fold(0.0, |acc, (_, value)| acc + *value)
+            / self.cpu_samples.len() as f32;
+        average / 100.0
     }
 
     fn update_main_window(&mut self, context: &mut EngineContext, dt: f32) {
@@ -217,31 +282,13 @@ impl Application {
         render_data.data.time = self.time;
         render_data.data.wind_strength = 0.002 + (self.time * 0.2).sin().powf(4.0).max(0.0) * 0.01;
 
-        self.system.refresh_cpu();
-        for cpu in self.system.cpus() {
-            self.cpu_usage_queue
-                .push((std::time::Instant::now(), cpu.cpu_usage()));
-        }
-
-        let current_time = std::time::Instant::now();
-        self.cpu_sample_timer -= dt;
-        if self.cpu_sample_timer < 0.0 {
-            self.cpu_sample_timer = 0.1;
-            self.cpu_usage_queue.retain(|(start_time, _)| {
-                current_time
-                    .checked_duration_since(*start_time)
-                    .is_none_or(|time| time.as_secs_f32() < 5.0)
-            });
-        }
-
-        let average = self
-            .cpu_usage_queue
-            .iter()
-            .fold(0.0, |acc, (_, value)| acc + *value)
-            / self.cpu_usage_queue.len() as f32;
-        let normalized_average = average / 100.0;
+        let average_cpu = self.get_average_cpu(dt);
         self.l_config.interpolation +=
-            (normalized_average - self.l_config.interpolation) * (1.0 - (-0.3 * dt).exp());
+            (average_cpu - self.l_config.interpolation) * (1.0 - (-0.3 * dt).exp());
+
+        let average_ram = self.get_average_ram(dt);
+        self.l_config.rendering.width_mod = Some(average_ram + 0.5);
+
         self.l_config.reseed(self.l_config.seed);
 
         self.plant = create_plant(context.renderer, &self.l_config);
@@ -286,22 +333,20 @@ impl Application {
 
         self.update_dust(dt, context.renderer);
 
-        let instance = self.plant.instances.first_mut().unwrap();
-
         if window
             .events()
             .is_mouse_pressed(jandering_engine::window::MouseButton::Left)
         {
-            *instance = instance.resize(-0.1);
+            self.plant_size -= 0.1;
         }
 
-        let mut size = instance.size();
+        let old_size = self.plant_size;
+        self.plant_size += (1.0 - self.plant_size) * (1.0 - (-15.0 * dt).exp());
 
-        let old_size = size;
-        size += (Vec3::ONE - size) * (1.0 - (-15.0 * dt).exp());
-        *instance = instance.set_size(size);
+        let instance = self.plant.instances.first_mut().unwrap();
+        *instance = instance.set_size(Vec3::splat(self.plant_size));
 
-        if old_size.max_element() < 0.865 {
+        if old_size < 0.865 {
             let instance = *instance;
             self.l_config.randomize_rule_sets(Some(2));
             self.l_config.reseed(rand::thread_rng().gen::<u64>());

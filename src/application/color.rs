@@ -2,7 +2,7 @@ use colors_transform::Color;
 use jandering_engine::types::Vec3;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Copy, Clone)]
 pub enum ColorValue {
     RGB{
         value: [f32; 3]
@@ -24,12 +24,13 @@ impl ColorValue {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Copy, Clone)]
 pub struct LutColorStop {
     pub color: ColorValue,
     pub age: u32
 }
 
+#[derive(Clone)]
 pub struct ColorLut {
     pub colors: Vec<LutColorStop>,
 }

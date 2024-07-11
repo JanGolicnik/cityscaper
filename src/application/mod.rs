@@ -78,6 +78,7 @@ pub struct Application {
     plant_interpolation: f32,
 
     color_lut: ColorLut,
+    original_color_lut: ColorLut,
 }
 
 const N_DUST: u32 = 60;
@@ -207,7 +208,8 @@ impl Application {
 
             plant_interpolation,
 
-            color_lut,
+            original_color_lut: color_lut.clone(),
+            color_lut
         }
     }
 
@@ -356,9 +358,12 @@ impl Application {
         let width_mod = average_ram + 0.5;
 
         let average_gpu = self.get_average_gpu(dt);
-        for color in self.color_lut.colors.iter_mut() {
+        for (i, color )in self.color_lut.colors.iter_mut().enumerate() {
             if let ColorValue::HSL { value } = &mut color.color {
-                value[0] = (value[0] + average_gpu * dt * 30.0) % 360.0;
+                value[0] = (value[0] + average_gpu * average_gpu * dt * 30.0) % 360.0;
+                if let ColorValue::HSL { value: original_value } = self.original_color_lut.colors[i].color {
+                    value[1] = original_value[1] * (average_gpu * 0.5 + 0.5);
+                }
             }
         }
 
